@@ -21,10 +21,13 @@
       text-align: center; width: 60px; height: 60px;
       display: flex; flex-direction: column; justify-content: center;
       border: 2px solid #555;
+      cursor: pointer; /* スマホでのタップ反応を良くする必須設定 */
+      user-select: none; /* テキスト選択を防止 */
     }
-    .panel span { font-size: 10px; color: #aaa; }
-    .panel div { font-size: 24px; font-weight: bold; margin-top: 5px; color: #ffe6b3;}
-    #hold-btn { cursor: pointer; background: #5a4a3a; border-color: #d3a052; }
+    .panel span { font-size: 10px; color: #aaa; pointer-events: none; }
+    .panel div { font-size: 24px; font-weight: bold; margin-top: 5px; color: #ffe6b3; pointer-events: none;}
+    #hold-btn { background: #5a4a3a; border-color: #d3a052; }
+    #next-btn { background: #3a4a5a; border-color: #52a0d3; }
     #score-display { font-size: 20px; font-weight: bold; color: #4caf50; }
     canvas {
       background-color: #E2C275;
@@ -43,7 +46,7 @@
   <div id="ui-header">
     <div id="hold-btn" class="panel"><span>HOLD</span><div id="hold-piece"></div></div>
     <div id="score-display">0 LINES</div>
-    <div class="panel"><span>NEXT</span><div id="next-piece">歩</div></div>
+    <div id="next-btn" class="panel"><span>NEXT</span><div id="next-piece">歩</div></div>
   </div>
 
   <canvas id="gameCanvas"></canvas>
@@ -56,13 +59,12 @@
     const nextEl = document.getElementById('next-piece');
     const holdEl = document.getElementById('hold-piece');
     const holdBtn = document.getElementById('hold-btn');
+    const nextBtn = document.getElementById('next-btn');
     const messageEl = document.getElementById('message-overlay');
 
     const COLS = 5;
     const ROWS = 9;
     let cellSize = 1;
-    let boardOffsetX = 0;
-    let boardOffsetY = 0;
 
     // ゲームの定数・状態
     const PIECE_TYPES = ['歩', '歩', '歩', '香', '桂']; // 出現確率調整
@@ -71,7 +73,7 @@
     let holdPiece = null;
     let canHold = true;
     let linesCleared = 0;
-    let gameState = 'playing'; // playing, gameover
+    let gameState = 'playing';
     let fallInterval;
     
     // 操作状態
@@ -81,11 +83,9 @@
     // 画面リサイズ調整
     function resize() {
       const maxWidth = 400;
-      const maxHeight = window.innerHeight - 100;
       const w = Math.min(window.innerWidth, maxWidth);
       cellSize = Math.floor(w / COLS);
       const h = cellSize * ROWS;
-      
       canvas.width = cellSize * COLS;
       canvas.height = h;
     }
@@ -106,7 +106,6 @@
           }
         }
       }
-      // 王将を1つ配置
       board[1][Math.floor(Math.random()*COLS)] = { type: '王', owner: 'enemy', promoted: false };
     }
 
@@ -134,21 +133,21 @@
         ctx.beginPath(); ctx.moveTo(x * cellSize, 0); ctx.lineTo(x * cellSize, canvas.height); ctx.stroke();
       }
 
-      // 最下段（配置エリア）のハイライト（Next選択時）
+      // Next選択時、一番下の行をハイライト
       if (selectedCell === 'next') {
-        ctx.fillStyle = 'rgba(76, 175, 80, 0.3)';
+        ctx.fillStyle = 'rgba(76, 175, 80, 0.4)';
         ctx.fillRect(0, cellSize * (ROWS - 1), canvas.width, cellSize);
       }
 
       // 有効な移動先のハイライト
-      ctx.fillStyle = 'rgba(33, 150, 243, 0.4)';
+      ctx.fillStyle = 'rgba(33, 150, 243, 0.5)';
       validMoves.forEach(m => {
         ctx.fillRect(m.x * cellSize, m.y * cellSize, cellSize, cellSize);
       });
 
       // 選択中の駒のハイライト
       if (selectedCell && selectedCell !== 'next') {
-        ctx.fillStyle = 'rgba(255, 235, 59, 0.5)';
+        ctx.fillStyle = 'rgba(255, 235, 59, 0.6)';
         ctx.fillRect(selectedCell.x * cellSize, selectedCell.y * cellSize, cellSize, cellSize);
       }
 
@@ -160,7 +159,6 @@
             const px = x * cellSize + cellSize / 2;
             const py = y * cellSize + cellSize / 2;
             
-            // 駒の形（簡易的な将棋駒の五角形風、敵は四角）
             ctx.beginPath();
             if (p.owner === 'player') {
               ctx.moveTo(px, py - cellSize*0.4);
@@ -181,13 +179,11 @@
             ctx.lineWidth = 2;
             ctx.stroke();
 
-            // 文字
             let text = p.type;
             if (p.promoted && p.owner === 'player') text = '成';
             if (p.type === 'block') text = '';
             
             ctx.fillStyle = (p.promoted || p.type === '王') ? '#d32f2f' : '#000';
-            if(p.type === 'block') ctx.fillStyle = '#fff'; // block hasn't text, but safe
             ctx.font = `bold ${cellSize * 0.4}px sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
@@ -203,7 +199,6 @@
       let moves = [];
       if (!p || p.owner !== 'player') return moves;
 
-      // 「成り」駒は周囲8マスの空きマスに移動可能（ジョーカー化）
       if (p.promoted) {
         for (let dy = -1; dy <= 1; dy++) {
           for (let dx = -1; dx <= 1; dx++) {
@@ -217,24 +212,22 @@
         return moves;
       }
 
-      // 通常の駒
       if (p.type === '歩') {
         if (y - 1 >= 0 && !board[y - 1][x]) moves.push({x: x, y: y - 1});
       } else if (p.type === '香') {
         for (let ny = y - 1; ny >= 0; ny--) {
           if (!board[ny][x]) moves.push({x: x, y: ny});
-          else break; // 障害物でストップ
+          else break;
         }
       } else if (p.type === '桂') {
         if (y - 2 >= 0) {
-          if (x - 1 >= 0 && !board[y - 2][x - 1]) moves.push({x: x - 1, y: y - 2}); // 左上
-          if (x + 1 < COLS && !board[y - 2][x + 1]) moves.push({x: x + 1, y: y - 2}); // 右上
+          if (x - 1 >= 0 && !board[y - 2][x - 1]) moves.push({x: x - 1, y: y - 2});
+          if (x + 1 < COLS && !board[y - 2][x + 1]) moves.push({x: x + 1, y: y - 2});
         }
       }
       return moves;
     }
 
-    // ライン消去と重力（落ちコン）処理
     function checkLines() {
       let clearedAny = false;
       let hasKing = false;
@@ -252,22 +245,16 @@
           linesCleared++;
           if (rowHasKing) hasKing = true;
 
-          // 上のブロックをすべて1段下に落とす（テトリスと同じ重力）
           for (let shiftY = y; shiftY > 0; shiftY--) {
-            for (let x = 0; x < COLS; x++) {
-              board[shiftY][x] = board[shiftY - 1][x];
-            }
+            for (let x = 0; x < COLS; x++) board[shiftY][x] = board[shiftY - 1][x];
           }
-          // 一番上を空にする
           for (let x = 0; x < COLS; x++) board[0][x] = null;
-          
-          y++; // 落ちてきた行をもう一度チェックするためにインデックスを戻す
+          y++;
         }
       }
 
       if (clearedAny) {
         scoreEl.textContent = `${linesCleared} LINES`;
-        // 王将全消しボーナス
         if (hasKing) {
           showMessage("王将撃破！全消しボーナス！");
           for (let y = 0; y < ROWS; y++) {
@@ -275,7 +262,6 @@
               if (board[y][x] && board[y][x].owner === 'enemy') board[y][x] = null;
             }
           }
-          // 全消し後にもう一度落下処理が必要な場合は再帰呼び出し
           setTimeout(checkLines, 300);
         }
         draw();
@@ -288,75 +274,28 @@
       setTimeout(() => { messageEl.style.display = 'none'; }, 2000);
     }
 
-    // 操作を確定した後の処理
     function endTurn() {
       checkLines();
       selectedCell = null;
       validMoves = [];
-      canHold = true; // ターン経過でホールド権復活
+      canHold = true;
       draw();
     }
 
-    // 入力制御
-    canvas.addEventListener('pointerdown', (e) => {
-      if (gameState !== 'playing') return;
-      const rect = canvas.getBoundingClientRect();
-      const x = Math.floor((e.clientX - rect.left) / cellSize);
-      const y = Math.floor((e.clientY - rect.top) / cellSize);
+    // --- 入力制御（スマホ向けに最適化） ---
 
-      if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return;
-
-      // 1. Next駒を選択中の場合（最下段に配置）
-      if (selectedCell === 'next') {
-        if (y === ROWS - 1 && !board[y][x]) {
-          board[y][x] = { type: nextPiece, owner: 'player', promoted: false };
-          nextPiece = getRandomPiece();
-          nextEl.textContent = nextPiece;
-          endTurn();
-        } else {
-          selectedCell = null; // キャンセル
-          draw();
-        }
-        return;
-      }
-
-      // 2. 盤面の移動先をクリックした場合
-      const move = validMoves.find(m => m.x === x && m.y === y);
-      if (move && selectedCell) {
-        // 移動実行
-        const p = board[selectedCell.y][selectedCell.x];
-        board[y][x] = p;
-        board[selectedCell.y][selectedCell.x] = null;
-        
-        // 成り判定（上3段）
-        if (y <= 2) p.promoted = true;
-        
-        endTurn();
-        return;
-      }
-
-      // 3. 盤面の自分の駒をクリックした場合（選択）
-      if (board[y][x] && board[y][x].owner === 'player') {
-        selectedCell = { x, y };
-        validMoves = getValidMoves(x, y);
-        draw();
-      } else {
-        selectedCell = null;
-        validMoves = [];
-        draw();
-      }
-    });
-
-    // Next駒のタップ（配置モードへ）
-    nextEl.parentElement.addEventListener('click', () => {
+    // NEXTボタンをタップした時
+    nextBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
       if (gameState !== 'playing') return;
       selectedCell = 'next';
       validMoves = [];
       draw();
     });
 
-    // Holdボタンのタップ
-    holdBtn.addEventListener('click', () => {
+    // HOLDボタンをタップした時
+    holdBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
       if (gameState !== 'playing' || !canHold) return;
       if (holdPiece === null) {
         holdPiece = nextPiece;
@@ -368,16 +307,63 @@
       }
       nextEl.textContent = nextPiece;
       holdEl.textContent = holdPiece;
-      canHold = false; // 1ターンに1回まで
+      canHold = false;
       selectedCell = null;
       draw();
     });
 
-    // 敵ブロックが迫ってくる（時間経過）
+    // 盤面をタップした時
+    canvas.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      if (gameState !== 'playing') return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.floor((e.clientX - rect.left) / cellSize);
+      const y = Math.floor((e.clientY - rect.top) / cellSize);
+
+      if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return;
+
+      // 1. Next駒を選択中の場合（タップした列の一番下に配置）
+      if (selectedCell === 'next') {
+        // yの座標に関わらず、タップした列の一番下（ROWS - 1）が空いていれば配置
+        if (!board[ROWS - 1][x]) {
+          board[ROWS - 1][x] = { type: nextPiece, owner: 'player', promoted: false };
+          nextPiece = getRandomPiece();
+          nextEl.textContent = nextPiece;
+          endTurn();
+        } else {
+          // その列の一番下がすでに埋まっている場合はキャンセル
+          selectedCell = null;
+          draw();
+        }
+        return;
+      }
+
+      // 2. 盤面の移動先（青いマス）をタップした場合
+      const move = validMoves.find(m => m.x === x && m.y === y);
+      if (move && selectedCell) {
+        const p = board[selectedCell.y][selectedCell.x];
+        board[y][x] = p;
+        board[selectedCell.y][selectedCell.x] = null;
+        if (y <= 2) p.promoted = true; // 成り判定
+        endTurn();
+        return;
+      }
+
+      // 3. 盤面の自分の駒をタップした場合（選択状態にする）
+      if (board[y][x] && board[y][x].owner === 'player') {
+        selectedCell = { x, y };
+        validMoves = getValidMoves(x, y);
+        draw();
+      } else {
+        selectedCell = null;
+        validMoves = [];
+        draw();
+      }
+    });
+
     function pushDown() {
       if (gameState !== 'playing') return;
-
-      // ゲームオーバー判定（一番下に敵ブロックがあるか）
       for (let x = 0; x < COLS; x++) {
         if (board[ROWS - 1][x] && board[ROWS - 1][x].owner === 'enemy') {
           gameState = 'gameover';
@@ -386,37 +372,23 @@
           return;
         }
       }
-
-      // 全体を1段下げる
       for (let y = ROWS - 1; y > 0; y--) {
-        for (let x = 0; x < COLS; x++) {
-          board[y][x] = board[y - 1][x];
-          // 自分の駒が押し出されて画面外（一番下）に行ったら消滅する
-        }
+        for (let x = 0; x < COLS; x++) board[y][x] = board[y - 1][x];
       }
-
-      // 一番上に新しいブロック行を生成
       for (let x = 0; x < COLS; x++) {
         if (Math.random() < 0.6) {
-          // たまに王将
           const isKing = Math.random() < 0.1;
           board[0][x] = { type: isKing ? '王' : 'block', owner: 'enemy', promoted: false };
         } else {
           board[0][x] = null;
         }
       }
-
-      // 押し出された後にラインが揃っているかチェック
       checkLines();
-      
-      // もし自分の駒が押し出されて成りゾーンから出ても、成った状態は維持される（救済措置）
       draw();
     }
 
-    // ゲーム開始
     initBoard();
     draw();
-    // 12秒ごとにブロックが迫ってくる
     fallInterval = setInterval(pushDown, 12000);
 
   </script>
