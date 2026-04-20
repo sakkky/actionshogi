@@ -5,8 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>将棋テトリス：昇天</title>
   <style>
-    body {
-      margin: 0; padding: 0; overflow: hidden;
+    /* 画面全体にぴったり収めるための設定 */
+    html, body {
+      margin: 0; padding: 0;
+      height: 100%; height: 100dvh; /* iOS Safari対策の動的ビューポート */
+      overflow: hidden;
       background-color: #333; color: #fff;
       font-family: 'Helvetica Neue', Arial, sans-serif;
       display: flex; flex-direction: column; align-items: center;
@@ -15,23 +18,33 @@
       width: 100%; max-width: 400px;
       display: flex; justify-content: space-between; align-items: center;
       padding: 10px; box-sizing: border-box; background: #222;
+      flex-shrink: 0; /* ヘッダーが潰れるのを防ぐ */
     }
     .panel {
       background: #444; border-radius: 8px; padding: 5px 10px;
       text-align: center; width: 60px; height: 60px;
       display: flex; flex-direction: column; justify-content: center;
       border: 2px solid #555;
-      cursor: pointer; /* スマホでのタップ反応を良くする必須設定 */
-      user-select: none; /* テキスト選択を防止 */
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none; /* iOS Safariのテキスト選択防止 */
     }
     .panel span { font-size: 10px; color: #aaa; pointer-events: none; }
     .panel div { font-size: 24px; font-weight: bold; margin-top: 5px; color: #ffe6b3; pointer-events: none;}
     #hold-btn { background: #5a4a3a; border-color: #d3a052; }
     #next-btn { background: #3a4a5a; border-color: #52a0d3; }
     #score-display { font-size: 20px; font-weight: bold; color: #4caf50; }
+    
+    #canvas-container {
+      flex-grow: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center; /* キャンバスを中央に配置 */
+      width: 100%;
+    }
     canvas {
       background-color: #E2C275;
-      box-shadow: 0 0 10px rgba(0,0,0,0.5);
+      box-shadow: 0 0 10px rgba(0,0,0,0.8);
       touch-action: none;
     }
     #message-overlay {
@@ -49,7 +62,9 @@
     <div id="next-btn" class="panel"><span>NEXT</span><div id="next-piece">歩</div></div>
   </div>
 
-  <canvas id="gameCanvas"></canvas>
+  <div id="canvas-container">
+    <canvas id="gameCanvas"></canvas>
+  </div>
   <div id="message-overlay"></div>
 
   <script>
@@ -66,8 +81,7 @@
     const ROWS = 9;
     let cellSize = 1;
 
-    // ゲームの定数・状態
-    const PIECE_TYPES = ['歩', '歩', '歩', '香', '桂']; // 出現確率調整
+    const PIECE_TYPES = ['歩', '歩', '歩', '香', '桂'];
     let board = Array(ROWS).fill(null).map(() => Array(COLS).fill(null));
     let nextPiece = getRandomPiece();
     let holdPiece = null;
@@ -76,28 +90,36 @@
     let gameState = 'playing';
     let fallInterval;
     
-    // 操作状態
-    let selectedCell = null; // {x, y} または 'next'
+    let selectedCell = null;
     let validMoves = [];
 
-    // 画面リサイズ調整
+    // --- 画面サイズに合わせて盤面をピッタリ収める処理 ---
     function resize() {
-      const maxWidth = 400;
-      const w = Math.min(window.innerWidth, maxWidth);
-      cellSize = Math.floor(w / COLS);
-      const h = cellSize * ROWS;
+      const header = document.getElementById('ui-header');
+      const container = document.getElementById('canvas-container');
+      
+      // ヘッダーを除いた「使える画面の高さ」と「幅」を取得
+      const availableHeight = container.clientHeight - 10; // 少し余白を持たせる
+      const availableWidth = Math.min(window.innerWidth, 400);
+
+      // 横幅基準と縦幅基準、どちらでも画面からはみ出さないセルサイズを計算
+      const cellSizeW = Math.floor(availableWidth / COLS);
+      const cellSizeH = Math.floor(availableHeight / ROWS);
+      
+      // 小さい方を採用することで絶対にはみ出さない
+      cellSize = Math.min(cellSizeW, cellSizeH);
+
       canvas.width = cellSize * COLS;
-      canvas.height = h;
+      canvas.height = cellSize * ROWS;
+      
+      if(gameState === 'playing') draw(); // リサイズ時に再描画
     }
     window.addEventListener('resize', resize);
-    resize();
 
-    // ユーティリティ
     function getRandomPiece() {
       return PIECE_TYPES[Math.floor(Math.random() * PIECE_TYPES.length)];
     }
 
-    // 初期盤面生成（奥にブロックを配置）
     function initBoard() {
       for (let y = 0; y < 4; y++) {
         for (let x = 0; x < COLS; x++) {
@@ -109,11 +131,9 @@
       board[1][Math.floor(Math.random()*COLS)] = { type: '王', owner: 'enemy', promoted: false };
     }
 
-    // 描画
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 成りゾーン（上3段）の背景
       ctx.fillStyle = 'rgba(211, 47, 47, 0.15)';
       ctx.fillRect(0, 0, canvas.width, cellSize * 3);
       ctx.beginPath();
@@ -123,7 +143,6 @@
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // グリッド線
       ctx.strokeStyle = 'rgba(0,0,0,0.1)';
       ctx.lineWidth = 1;
       for (let y = 0; y <= ROWS; y++) {
@@ -133,25 +152,21 @@
         ctx.beginPath(); ctx.moveTo(x * cellSize, 0); ctx.lineTo(x * cellSize, canvas.height); ctx.stroke();
       }
 
-      // Next選択時、一番下の行をハイライト
       if (selectedCell === 'next') {
         ctx.fillStyle = 'rgba(76, 175, 80, 0.4)';
         ctx.fillRect(0, cellSize * (ROWS - 1), canvas.width, cellSize);
       }
 
-      // 有効な移動先のハイライト
       ctx.fillStyle = 'rgba(33, 150, 243, 0.5)';
       validMoves.forEach(m => {
         ctx.fillRect(m.x * cellSize, m.y * cellSize, cellSize, cellSize);
       });
 
-      // 選択中の駒のハイライト
       if (selectedCell && selectedCell !== 'next') {
         ctx.fillStyle = 'rgba(255, 235, 59, 0.6)';
         ctx.fillRect(selectedCell.x * cellSize, selectedCell.y * cellSize, cellSize, cellSize);
       }
 
-      // 駒の描画
       for (let y = 0; y < ROWS; y++) {
         for (let x = 0; x < COLS; x++) {
           const p = board[y][x];
@@ -193,7 +208,6 @@
       }
     }
 
-    // 移動可能範囲の計算
     function getValidMoves(x, y) {
       const p = board[y][x];
       let moves = [];
@@ -282,9 +296,6 @@
       draw();
     }
 
-    // --- 入力制御（スマホ向けに最適化） ---
-
-    // NEXTボタンをタップした時
     nextBtn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       if (gameState !== 'playing') return;
@@ -293,7 +304,6 @@
       draw();
     });
 
-    // HOLDボタンをタップした時
     holdBtn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       if (gameState !== 'playing' || !canHold) return;
@@ -312,7 +322,6 @@
       draw();
     });
 
-    // 盤面をタップした時
     canvas.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       if (gameState !== 'playing') return;
@@ -323,34 +332,29 @@
 
       if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return;
 
-      // 1. Next駒を選択中の場合（タップした列の一番下に配置）
       if (selectedCell === 'next') {
-        // yの座標に関わらず、タップした列の一番下（ROWS - 1）が空いていれば配置
         if (!board[ROWS - 1][x]) {
           board[ROWS - 1][x] = { type: nextPiece, owner: 'player', promoted: false };
           nextPiece = getRandomPiece();
           nextEl.textContent = nextPiece;
           endTurn();
         } else {
-          // その列の一番下がすでに埋まっている場合はキャンセル
           selectedCell = null;
           draw();
         }
         return;
       }
 
-      // 2. 盤面の移動先（青いマス）をタップした場合
       const move = validMoves.find(m => m.x === x && m.y === y);
       if (move && selectedCell) {
         const p = board[selectedCell.y][selectedCell.x];
         board[y][x] = p;
         board[selectedCell.y][selectedCell.x] = null;
-        if (y <= 2) p.promoted = true; // 成り判定
+        if (y <= 2) p.promoted = true;
         endTurn();
         return;
       }
 
-      // 3. 盤面の自分の駒をタップした場合（選択状態にする）
       if (board[y][x] && board[y][x].owner === 'player') {
         selectedCell = { x, y };
         validMoves = getValidMoves(x, y);
@@ -387,9 +391,14 @@
       draw();
     }
 
-    initBoard();
-    draw();
-    fallInterval = setInterval(pushDown, 12000);
+    // 初期化と起動
+    // フォント等の読み込み待ちを防ぐため、少しだけ遅らせてリサイズと描画を実行
+    setTimeout(() => {
+      resize();
+      initBoard();
+      draw();
+      fallInterval = setInterval(pushDown, 12000);
+    }, 100);
 
   </script>
 </body>
