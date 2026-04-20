@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>ひっぱり将棋バトル</title>
+  <title>ひっぱり将棋バトル - 突破編</title>
   <style>
     body {
       margin: 0;
@@ -32,11 +32,13 @@
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      font-size: 32px;
+      font-size: 28px;
       font-weight: bold;
       color: #d32f2f;
       text-shadow: 2px 2px 0 #fff;
       display: none;
+      text-align: center;
+      width: 100%;
     }
   </style>
 </head>
@@ -62,53 +64,58 @@
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
-    // ゲームの状態管理
-    let gameState = 'playing'; // playing, clear, gameover
+    let gameState = 'playing';
     let turns = 5;
-    const enemyMaxHp = 100;
-    let enemyHp = enemyMaxHp;
+    let enemyHp = 100;
 
     class Piece {
-      constructor(x, y, radius, text, isEnemy) {
+      constructor(x, y, radius, text, type) {
         this.x = x;
         this.y = y;
         this.vx = 0;
         this.vy = 0;
         this.radius = radius;
         this.text = text;
-        this.isEnemy = isEnemy;
-        this.mass = isEnemy ? 3 : 1; 
+        this.type = type; // 'player', 'king', 'wall'
         this.isPromoted = false;
+        this.active = true; // 破壊されたかどうか
       }
 
       draw() {
+        if (!this.active) return;
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-        ctx.fillStyle = this.isEnemy ? '#ffcccc' : (this.isPromoted ? '#ffdd99' : '#ffe6b3');
+        
+        if (this.type === 'king') ctx.fillStyle = '#ffb3b3';
+        else if (this.type === 'wall') ctx.fillStyle = '#cccccc';
+        else ctx.fillStyle = this.isPromoted ? '#ffdd99' : '#ffe6b3';
+        
         ctx.fill();
         ctx.strokeStyle = '#333';
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        ctx.fillStyle = (this.isPromoted || this.isEnemy) ? '#d32f2f' : '#000';
+        ctx.fillStyle = (this.isPromoted || this.type === 'king') ? '#d32f2f' : '#000';
         ctx.font = `bold ${this.radius * 0.8}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(this.text, this.x, this.y);
 
-        // 王のHPバー描画
-        if (this.isEnemy) {
+        // 王のHPバー
+        if (this.type === 'king') {
           ctx.fillStyle = '#333';
           ctx.fillRect(this.x - 30, this.y - this.radius - 20, 60, 8);
           ctx.fillStyle = '#4caf50';
-          const hpWidth = Math.max(0, (enemyHp / enemyMaxHp) * 60);
+          const hpWidth = Math.max(0, (enemyHp / 100) * 60);
           ctx.fillRect(this.x - 30, this.y - this.radius - 20, hpWidth, 8);
         }
       }
 
       update() {
-        this.vx *= 0.97; // 摩擦
-        this.vy *= 0.97;
+        if (!this.active || this.type === 'wall' || this.type === 'king') return; // 敵は動かない
+
+        this.vx *= 0.98;
+        this.vy *= 0.98;
 
         if (Math.abs(this.vx) < 0.2) this.vx = 0;
         if (Math.abs(this.vy) < 0.2) this.vy = 0;
@@ -122,20 +129,27 @@
         if (this.y - this.radius < 0) { this.y = this.radius; this.vy *= -0.8; }
         if (this.y + this.radius > canvas.height) { this.y = canvas.height - this.radius; this.vy *= -0.8; }
 
-        // 「成り」の判定（画面上部30%に入ったら）
+        // 成り判定
         const promotionZone = canvas.height * 0.3;
-        if (!this.isEnemy && !this.isPromoted && this.y < promotionZone) {
+        if (this.type === 'player' && !this.isPromoted && this.y < promotionZone) {
           this.isPromoted = true;
           this.text = 'と';
-          this.radius += 10; // 大きくなる
-          this.mass = 2;     // 重くなる（ダメージアップ）
+          this.radius += 10;
         }
       }
     }
 
-    let player = new Piece(canvas.width / 2, canvas.height * 0.8, 30, '歩', false);
-    let enemy = new Piece(canvas.width / 2, canvas.height * 0.15, 45, '王', true);
-    let pieces = [player, enemy];
+    // 初期配置
+    let player = new Piece(canvas.width / 2, canvas.height * 0.85, 25, '歩', 'player');
+    let enemies = [
+      new Piece(canvas.width / 2, canvas.height * 0.15, 45, '王', 'king')
+    ];
+    
+    // 王を守る3つの壁（敵の歩）
+    const wallY = canvas.height * 0.35;
+    enemies.push(new Piece(canvas.width / 2, wallY, 25, '歩', 'wall'));
+    enemies.push(new Piece(canvas.width / 2 - 70, wallY, 25, '歩', 'wall'));
+    enemies.push(new Piece(canvas.width / 2 + 70, wallY, 25, '歩', 'wall'));
 
     let isDragging = false;
     let currentX = 0;
@@ -145,7 +159,6 @@
       if (gameState !== 'playing') return;
       const dx = e.clientX - player.x;
       const dy = e.clientY - player.y;
-      // 駒が完全に止まっている時だけ引ける
       if (Math.hypot(dx, dy) < player.radius && player.vx === 0 && player.vy === 0) {
         isDragging = true;
         currentX = e.clientX;
@@ -165,65 +178,74 @@
       
       const dx = player.x - currentX;
       const dy = player.y - currentY;
-      player.vx = dx * 0.15;
-      player.vy = dy * 0.15;
+      player.vx = dx * 0.18; // 少しスピードアップ
+      player.vy = dy * 0.18;
 
       turns--;
       turnDisplay.textContent = `残り手数: ${turns}`;
     });
 
     function checkCollisions() {
-      const dx = enemy.x - player.x;
-      const dy = enemy.y - player.y;
-      const distance = Math.hypot(dx, dy);
-      const minDist = player.radius + enemy.radius;
+      enemies.forEach(enemy => {
+        if (!enemy.active) return;
 
-      if (distance < minDist) {
-        const overlap = minDist - distance;
-        const nx = dx / distance;
-        const ny = dy / distance;
-        
-        player.x -= nx * (overlap / 2);
-        enemy.x += nx * (overlap / 2);
+        const dx = enemy.x - player.x;
+        const dy = enemy.y - player.y;
+        const distance = Math.hypot(dx, dy);
+        const minDist = player.radius + enemy.radius;
 
-        const relativeVelocityX = player.vx - enemy.vx;
-        const relativeVelocityY = player.vy - enemy.vy;
-        const speed = relativeVelocityX * nx + relativeVelocityY * ny;
+        if (distance < minDist) {
+          // 衝突処理
+          const speed = Math.hypot(player.vx, player.vy);
 
-        if (speed > 0) {
-          const restitution = 0.8;
-          const impulse = (2 * speed) / (player.mass + enemy.mass);
-          
-          player.vx -= impulse * enemy.mass * nx * restitution;
-          player.vy -= impulse * enemy.mass * ny * restitution;
-          enemy.vx += impulse * player.mass * nx * restitution;
-          enemy.vy += impulse * player.mass * ny * restitution;
-
-          // ダメージ計算（衝撃の強さ × 自駒の重さ）
-          const damage = Math.floor(speed * player.mass * 1.5);
-          if (damage > 0) {
-            enemyHp -= damage;
-            if (enemyHp < 0) enemyHp = 0;
-            hpDisplay.textContent = `王のHP: ${enemyHp}`;
+          if (enemy.type === 'wall') {
+            enemy.active = false; // 壁を破壊
+            if (!player.isPromoted) {
+              // 「歩」の時は壁に当たると勢いが死ぬ（貫通できない）
+              player.vx = 0;
+              player.vy = 0;
+            }
+            // 「と金」の時は減速しつつ貫通する
+            else {
+              player.vx *= 0.8;
+              player.vy *= 0.8;
+            }
+          } 
+          else if (enemy.type === 'king') {
+            // 王へのダメージ
+            const damage = player.isPromoted ? 40 : 15; // と金なら大ダメージ
+            if (speed > 2) { // ある程度スピードがないとダメージにならない
+              enemyHp -= damage;
+              if (enemyHp < 0) enemyHp = 0;
+              hpDisplay.textContent = `王のHP: ${enemyHp}`;
+              
+              // 王に当たったら跳ね返る
+              const nx = dx / distance;
+              const ny = dy / distance;
+              player.vx = -nx * speed * 0.5;
+              player.vy = -ny * speed * 0.5;
+            }
           }
+
+          // 重なりを解消
+          const overlap = minDist - distance;
+          player.x -= (dx / distance) * overlap;
         }
-      }
+      });
     }
 
     function checkGameState() {
       if (gameState !== 'playing') return;
 
-      // 敵を倒したか
       if (enemyHp <= 0) {
         gameState = 'clear';
-        messageEl.textContent = 'クリア！王将討ち取ったり！';
+        messageEl.innerHTML = '見事！<br>王将討ち取ったり！';
         messageEl.style.display = 'block';
         messageEl.style.color = '#4caf50';
       } 
-      // ターン切れで、かつ両方の駒が止まったか
-      else if (turns <= 0 && player.vx === 0 && player.vy === 0 && enemy.vx === 0 && enemy.vy === 0) {
+      else if (turns <= 0 && player.vx === 0 && player.vy === 0) {
         gameState = 'gameover';
-        messageEl.textContent = 'ゲームオーバー...';
+        messageEl.innerHTML = '無念...<br>手数が尽きました';
         messageEl.style.display = 'block';
       }
     }
@@ -231,8 +253,8 @@
     function loop() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 敵陣（成りゾーン）の背景を描画
-      ctx.fillStyle = 'rgba(211, 47, 47, 0.1)';
+      // 敵陣（成りゾーン）
+      ctx.fillStyle = 'rgba(211, 47, 47, 0.15)';
       ctx.fillRect(0, 0, canvas.width, canvas.height * 0.3);
       ctx.beginPath();
       ctx.moveTo(0, canvas.height * 0.3);
@@ -252,9 +274,13 @@
         ctx.stroke();
       }
 
-      pieces.forEach(p => p.update());
+      player.update();
+      enemies.forEach(e => e.update());
       checkCollisions();
-      pieces.forEach(p => p.draw());
+      
+      enemies.forEach(e => e.draw());
+      player.draw(); // プレイヤーを一番手前に描画
+      
       checkGameState();
 
       requestAnimationFrame(loop);
