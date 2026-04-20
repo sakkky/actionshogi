@@ -3,12 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>将棋テトリス：昇天</title>
+  <title>将棋テトリス：昇天 (ターン制)</title>
   <style>
-    /* 画面全体にぴったり収めるための設定 */
     html, body {
       margin: 0; padding: 0;
-      height: 100%; height: 100dvh; /* iOS Safari対策の動的ビューポート */
+      height: 100%; height: 100dvh;
       overflow: hidden;
       background-color: #333; color: #fff;
       font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -18,7 +17,7 @@
       width: 100%; max-width: 400px;
       display: flex; justify-content: space-between; align-items: center;
       padding: 10px; box-sizing: border-box; background: #222;
-      flex-shrink: 0; /* ヘッダーが潰れるのを防ぐ */
+      flex-shrink: 0;
     }
     .panel {
       background: #444; border-radius: 8px; padding: 5px 10px;
@@ -27,19 +26,22 @@
       border: 2px solid #555;
       cursor: pointer;
       user-select: none;
-      -webkit-user-select: none; /* iOS Safariのテキスト選択防止 */
+      -webkit-user-select: none;
     }
     .panel span { font-size: 10px; color: #aaa; pointer-events: none; }
     .panel div { font-size: 24px; font-weight: bold; margin-top: 5px; color: #ffe6b3; pointer-events: none;}
     #hold-btn { background: #5a4a3a; border-color: #d3a052; }
     #next-btn { background: #3a4a5a; border-color: #52a0d3; }
+    
+    .center-info { display: flex; flex-direction: column; align-items: center; }
     #score-display { font-size: 20px; font-weight: bold; color: #4caf50; }
+    #turn-display { font-size: 14px; font-weight: bold; color: #ff9800; margin-top: 4px; background: rgba(0,0,0,0.5); padding: 2px 8px; border-radius: 10px;}
     
     #canvas-container {
       flex-grow: 1;
       display: flex;
       justify-content: center;
-      align-items: center; /* キャンバスを中央に配置 */
+      align-items: center;
       width: 100%;
     }
     canvas {
@@ -51,6 +53,7 @@
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
       font-size: 32px; font-weight: bold; color: #ffeb3b;
       text-shadow: 2px 2px 4px #000; display: none; text-align: center; pointer-events: none;
+      background: rgba(0,0,0,0.7); padding: 20px; border-radius: 10px; width: 80%;
     }
   </style>
 </head>
@@ -58,7 +61,10 @@
 
   <div id="ui-header">
     <div id="hold-btn" class="panel"><span>HOLD</span><div id="hold-piece"></div></div>
-    <div id="score-display">0 LINES</div>
+    <div class="center-info">
+      <div id="score-display">0 LINES</div>
+      <div id="turn-display">降下まで: 3手</div>
+    </div>
     <div id="next-btn" class="panel"><span>NEXT</span><div id="next-piece">歩</div></div>
   </div>
 
@@ -71,6 +77,7 @@
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     const scoreEl = document.getElementById('score-display');
+    const turnEl = document.getElementById('turn-display');
     const nextEl = document.getElementById('next-piece');
     const holdEl = document.getElementById('hold-piece');
     const holdBtn = document.getElementById('hold-btn');
@@ -88,31 +95,27 @@
     let canHold = true;
     let linesCleared = 0;
     let gameState = 'playing';
-    let fallInterval;
+    
+    // ターン制の管理
+    let turnCount = 0;
+    const TURNS_TO_FALL = 3; // 3回行動するたびにブロックが下がる
     
     let selectedCell = null;
     let validMoves = [];
 
-    // --- 画面サイズに合わせて盤面をピッタリ収める処理 ---
     function resize() {
-      const header = document.getElementById('ui-header');
       const container = document.getElementById('canvas-container');
-      
-      // ヘッダーを除いた「使える画面の高さ」と「幅」を取得
-      const availableHeight = container.clientHeight - 10; // 少し余白を持たせる
+      const availableHeight = container.clientHeight - 10;
       const availableWidth = Math.min(window.innerWidth, 400);
 
-      // 横幅基準と縦幅基準、どちらでも画面からはみ出さないセルサイズを計算
       const cellSizeW = Math.floor(availableWidth / COLS);
       const cellSizeH = Math.floor(availableHeight / ROWS);
       
-      // 小さい方を採用することで絶対にはみ出さない
       cellSize = Math.min(cellSizeW, cellSizeH);
-
       canvas.width = cellSize * COLS;
       canvas.height = cellSize * ROWS;
       
-      if(gameState === 'playing') draw(); // リサイズ時に再描画
+      if(gameState === 'playing') draw();
     }
     window.addEventListener('resize', resize);
 
@@ -134,6 +137,7 @@
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      // 成りゾーン
       ctx.fillStyle = 'rgba(211, 47, 47, 0.15)';
       ctx.fillRect(0, 0, canvas.width, cellSize * 3);
       ctx.beginPath();
@@ -143,6 +147,7 @@
       ctx.lineWidth = 2;
       ctx.stroke();
 
+      // グリッド
       ctx.strokeStyle = 'rgba(0,0,0,0.1)';
       ctx.lineWidth = 1;
       for (let y = 0; y <= ROWS; y++) {
@@ -167,6 +172,7 @@
         ctx.fillRect(selectedCell.x * cellSize, selectedCell.y * cellSize, cellSize, cellSize);
       }
 
+      // 駒の描画
       for (let y = 0; y < ROWS; y++) {
         for (let x = 0; x < COLS; x++) {
           const p = board[y][x];
@@ -270,7 +276,7 @@
       if (clearedAny) {
         scoreEl.textContent = `${linesCleared} LINES`;
         if (hasKing) {
-          showMessage("王将撃破！全消しボーナス！");
+          showMessage("王将撃破！<br>全消しボーナス！");
           for (let y = 0; y < ROWS; y++) {
             for (let x = 0; x < COLS; x++) {
               if (board[y][x] && board[y][x].owner === 'enemy') board[y][x] = null;
@@ -283,16 +289,75 @@
     }
 
     function showMessage(msg) {
-      messageEl.textContent = msg;
+      messageEl.innerHTML = msg;
       messageEl.style.display = 'block';
       setTimeout(() => { messageEl.style.display = 'none'; }, 2000);
     }
 
+    // 盤面全体を1段下げる処理
+    function pushDown() {
+      if (gameState !== 'playing') return;
+      
+      // ゲームオーバー判定：一番下の段に敵ブロックが到達するかチェック
+      for (let x = 0; x < COLS; x++) {
+        if (board[ROWS - 1][x] && board[ROWS - 1][x].owner === 'enemy') {
+          gameState = 'gameover';
+          showMessage("GAME OVER<br>ブロックが最下段に到達");
+          return;
+        }
+      }
+
+      // ★修正箇所★：一番下の段（配置エリア）にある自分の駒を退避させて消滅を防ぐ
+      let bottomPlayerPieces = [];
+      for (let x = 0; x < COLS; x++) {
+        if (board[ROWS - 1][x] && board[ROWS - 1][x].owner === 'player') {
+          bottomPlayerPieces[x] = board[ROWS - 1][x];
+        }
+      }
+
+      // 敵ブロックを全体的に1段下げる
+      for (let y = ROWS - 1; y > 0; y--) {
+        for (let x = 0; x < COLS; x++) board[y][x] = board[y - 1][x];
+      }
+      
+      // 一番上に新しい敵ブロックを生成
+      for (let x = 0; x < COLS; x++) {
+        if (Math.random() < 0.6) {
+          const isKing = Math.random() < 0.1;
+          board[0][x] = { type: isKing ? '王' : 'block', owner: 'enemy', promoted: false };
+        } else {
+          board[0][x] = null;
+        }
+      }
+
+      // 退避させていた自分の駒を元の場所に戻す（踏ん張る！）
+      for (let x = 0; x < COLS; x++) {
+        if (bottomPlayerPieces[x]) {
+          board[ROWS - 1][x] = bottomPlayerPieces[x];
+        }
+      }
+
+      checkLines();
+      draw();
+    }
+
+    // 1手終わるごとの処理
     function endTurn() {
       checkLines();
       selectedCell = null;
       validMoves = [];
       canHold = true;
+      
+      // ターンを進める
+      turnCount++;
+      if (turnCount >= TURNS_TO_FALL) {
+        pushDown(); // 3回行動したらブロックが迫ってくる
+        turnCount = 0;
+      }
+      
+      const remaining = TURNS_TO_FALL - turnCount;
+      turnEl.textContent = `降下まで: ${remaining}手`;
+      
       draw();
     }
 
@@ -337,7 +402,7 @@
           board[ROWS - 1][x] = { type: nextPiece, owner: 'player', promoted: false };
           nextPiece = getRandomPiece();
           nextEl.textContent = nextPiece;
-          endTurn();
+          endTurn(); // ターン経過
         } else {
           selectedCell = null;
           draw();
@@ -351,7 +416,7 @@
         board[y][x] = p;
         board[selectedCell.y][selectedCell.x] = null;
         if (y <= 2) p.promoted = true;
-        endTurn();
+        endTurn(); // ターン経過
         return;
       }
 
@@ -366,38 +431,10 @@
       }
     });
 
-    function pushDown() {
-      if (gameState !== 'playing') return;
-      for (let x = 0; x < COLS; x++) {
-        if (board[ROWS - 1][x] && board[ROWS - 1][x].owner === 'enemy') {
-          gameState = 'gameover';
-          showMessage("GAME OVER");
-          clearInterval(fallInterval);
-          return;
-        }
-      }
-      for (let y = ROWS - 1; y > 0; y--) {
-        for (let x = 0; x < COLS; x++) board[y][x] = board[y - 1][x];
-      }
-      for (let x = 0; x < COLS; x++) {
-        if (Math.random() < 0.6) {
-          const isKing = Math.random() < 0.1;
-          board[0][x] = { type: isKing ? '王' : 'block', owner: 'enemy', promoted: false };
-        } else {
-          board[0][x] = null;
-        }
-      }
-      checkLines();
-      draw();
-    }
-
-    // 初期化と起動
-    // フォント等の読み込み待ちを防ぐため、少しだけ遅らせてリサイズと描画を実行
     setTimeout(() => {
       resize();
       initBoard();
       draw();
-      fallInterval = setInterval(pushDown, 12000);
     }, 100);
 
   </script>
