@@ -3,17 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>将棋テトリス：昇天 (完全固定サイズ編)</title>
+  <title>将棋テトリス：昇天 (画面ぴったり編)</title>
   <style>
-    /* 画面のズームやスクロールをCSSで完全に防止 */
+    /* 画面全体を固定（fixed）して、絶対にスクロールやはみ出しを起こさせない設定 */
     html, body {
-      margin: 0; padding: 0; height: 100%; height: 100dvh; overflow: hidden;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      margin: 0; padding: 0;
       background-color: #222; color: #fff; font-family: 'Helvetica Neue', Arial, sans-serif;
       display: flex; flex-direction: column; align-items: center;
-      touch-action: none; /* ズームやスクロールを無効化 */
-      overscroll-behavior: none; /* 引っ張り更新（リロード）を防止 */
-      -webkit-text-size-adjust: 100%; /* iPhoneでの文字サイズ自動調整を防ぐ */
-      user-select: none; -webkit-user-select: none; /* テキスト選択を防止 */
+      touch-action: none;
+      overscroll-behavior: none;
+      -webkit-text-size-adjust: 100%;
+      user-select: none; -webkit-user-select: none;
     }
     #ui-header {
       width: 100%; max-width: 400px; display: flex; justify-content: space-between; align-items: center;
@@ -35,7 +37,7 @@
     #status-display { font-size: 12px; font-weight: bold; color: #ff9800; margin-top: 4px; }
     
     #canvas-container {
-      flex-grow: 1; display: flex; justify-content: center; align-items: center; width: 100%;
+      flex-grow: 1; display: flex; justify-content: center; align-items: center; width: 100%; overflow: hidden;
     }
     canvas { background-color: #E2C275; box-shadow: 0 0 15px rgba(0,0,0,0.8); touch-action: none; }
     
@@ -64,10 +66,9 @@
   <div id="message-overlay"></div>
 
   <script>
-    // --- ダブルタップやピンチアウトによる強制ズームをJavaScriptでも防止 ---
     document.addEventListener('dblclick', function(e) { e.preventDefault(); }, { passive: false });
     document.addEventListener('touchstart', function(e) {
-      if (e.touches.length > 1) { e.preventDefault(); } // 2本指でのタップを無効化
+      if (e.touches.length > 1) { e.preventDefault(); }
     }, { passive: false });
 
     const canvas = document.getElementById('gameCanvas');
@@ -95,16 +96,22 @@
     let gravityTimer;
     let spawnTimer;
 
+    // --- サイズ計算の精度を上げる ---
     function resize() {
-      const container = document.getElementById('canvas-container');
-      const availableHeight = container.clientHeight - 10;
-      const availableWidth = Math.min(window.innerWidth, 400);
+      const headerHeight = document.getElementById('ui-header').offsetHeight;
+      // 画面全体の高さからヘッダーと余白(20px)を引いた「純粋に使える高さ」
+      const availableHeight = window.innerHeight - headerHeight - 20;
+      // 幅も少し余白を持たせる
+      const availableWidth = Math.min(window.innerWidth, 400) - 10;
+
+      // 縦横どちら基準でもはみ出さないサイズを決定
       cellSize = Math.min(Math.floor(availableWidth / COLS), Math.floor(availableHeight / ROWS));
+      
       canvas.width = cellSize * COLS;
       canvas.height = cellSize * ROWS;
       if(gameState === 'playing') draw();
     }
-    // リサイズイベントの頻度を下げて画面ガタつきを防止
+    
     window.addEventListener('resize', () => { setTimeout(resize, 100); });
 
     function getRandomPiece() {
@@ -344,7 +351,7 @@
     }
 
     nextBtn.addEventListener('pointerdown', (e) => {
-      e.preventDefault(); // ここで不要なアクションをストップ
+      e.preventDefault();
       if (gameState !== 'playing') return;
       selectedCell = 'next';
       validMoves = [];
@@ -369,7 +376,7 @@
     });
 
     canvas.addEventListener('pointerdown', (e) => {
-      e.preventDefault(); // ここでもストップ
+      e.preventDefault();
       if (gameState !== 'playing') return;
       
       const rect = canvas.getBoundingClientRect();
