@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>将棋テトリス：昇天 v2.1 (思考バランス調整版)</title>
+  <title>将棋テトリス：昇天 v2.2 (エンドレス編)</title>
   <style>
     html, body {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -27,7 +27,7 @@
     
     .center-info { display: flex; flex-direction: column; align-items: center; width: 120px; }
     #score-display { font-size: 22px; font-weight: bold; color: #4caf50; }
-    #time-display { font-size: 16px; font-weight: bold; color: #ffeb3b; margin-top: 2px; }
+    #lines-display { font-size: 16px; font-weight: bold; color: #ffeb3b; margin-top: 2px; }
     #combo-display { font-size: 14px; font-weight: bold; color: #ff9800; margin-top: 2px; opacity: 0; transition: opacity 0.2s;}
     
     #canvas-container {
@@ -60,7 +60,7 @@
     <div id="next-my-btn" class="panel"><span>MY NEXT</span><div id="my-next">歩</div></div>
     <div class="center-info">
       <div id="score-display">0</div>
-      <div id="time-display">03:00</div>
+      <div id="lines-display">0 LINES</div>
       <div id="combo-display">2 COMBO!</div>
     </div>
     <div class="panel"><span>ENEMY NEXT</span><div id="enemy-next"></div></div>
@@ -75,6 +75,7 @@
     <h1 id="result-title">将棋テトリス：昇天</h1>
     <div id="result-details" style="display:none;">
       <p id="res-score">Score: 0</p>
+      <p id="res-lines">Lines: 0</p>
       <p id="res-combo">Max Combo: 0</p>
       <p id="res-rank" style="font-size: 40px; color: #ff9800; margin-top: 10px;">Rank: C</p>
     </div>
@@ -82,7 +83,6 @@
   </div>
 
   <script>
-    // --- ズーム防止 ---
     document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
     document.addEventListener('touchstart', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 
@@ -124,7 +124,7 @@
     let cellSize = 1;
 
     // --- 状態管理 ---
-    let gameState = { status: "title", score: 0, combo: 0, timeLeft: 180, maxCombo: 0 };
+    let gameState = { status: "title", score: 0, combo: 0, lines: 0, maxCombo: 0 };
     let board = [];
     let spawnQueue = []; 
     let myNextPiece = '歩'; 
@@ -133,10 +133,10 @@
     
     let selectedCell = null;
     let validMoves = [];
-    let loopId, gravityTimerId, secondTimerId, spawnTimerId;
+    let loopId, gravityTimerId, checkStateTimerId, spawnTimerId;
 
     const uiScore = document.getElementById('score-display');
-    const uiTime = document.getElementById('time-display');
+    const uiLines = document.getElementById('lines-display');
     const uiCombo = document.getElementById('combo-display');
     const uiEnemyNext = document.getElementById('enemy-next');
     const uiMyNext = document.getElementById('my-next');
@@ -156,7 +156,7 @@
 
     function initGame() {
       if(!actx) actx = new AudioContext();
-      gameState = { status: "playing", score: 0, combo: 0, timeLeft: 180, maxCombo: 0 };
+      gameState = { status: "playing", score: 0, combo: 0, lines: 0, maxCombo: 0 };
       board = Array(ROWS).fill(null).map(() => Array(COLS).fill(null));
       spawnQueue = [getRandPiece(ENEMY_TYPES), getRandPiece(ENEMY_TYPES)];
       myNextPiece = getRandPiece(PIECE_TYPES);
@@ -165,16 +165,13 @@
       
       if(loopId) cancelAnimationFrame(loopId);
       if(gravityTimerId) clearInterval(gravityTimerId);
-      if(secondTimerId) clearInterval(secondTimerId);
+      if(checkStateTimerId) clearInterval(checkStateTimerId);
       if(spawnTimerId) clearTimeout(spawnTimerId);
       
-      // バランス調整: 落下速度を1.5秒に
       gravityTimerId = setInterval(applyGravity, 1500); 
-      secondTimerId = setInterval(tickTime, 1000);
+      checkStateTimerId = setInterval(checkGameState, 1000); // 1秒ごとに危険・ゲームオーバー判定
       
-      // 敵の出現ループを開始
       scheduleNextEnemy();
-      
       loop();
       overlay.style.display = 'none';
     }
@@ -190,16 +187,17 @@
       return arr[Math.floor(Math.random() * arr.length)];
     }
 
-    // --- コアロジック ---
-
-    function tickTime() {
+    // --- エンドレスモードの判定ロジック ---
+    function checkGameState() {
       if(gameState.status !== 'playing') return;
-      gameState.timeLeft--;
-      updateUI();
       
-      if(gameState.timeLeft <= 0 || checkTopOut()) {
+      // ゲームオーバー判定：敵ブロックが上から3段目（成りゾーン）まで積み上がったら
+      if(checkTopOut()) {
         endGame();
+        return;
       }
+      
+      // 危険演出：上から4段目に敵ブロックが来たら警告
       if(checkDanger()) {
         dangerOverlay.style.opacity = '1';
         playSound('danger');
@@ -210,22 +208,22 @@
     function checkTopOut() {
       for(let y = 0; y <= 2; y++) {
         for(let x = 0; x < COLS; x++) {
-          if(board[y][x] && board[y][x].state === 'fixed') return true;
+          // 自駒が成りゾーンにいるのはセーフ。敵の固定ブロックが来たらアウト
+          if(board[y][x] && board[y][x].owner === 'enemy' && board[y][x].state === 'fixed') return true;
         }
       }
       return false;
     }
+
     function checkDanger() {
       for(let x = 0; x < COLS; x++) {
-        if(board[3][x] && board[3][x].state === 'fixed') return true;
+        if(board[3][x] && board[3][x].owner === 'enemy' && board[3][x].state === 'fixed') return true;
       }
       return false;
     }
 
-    // --- 出現と落下の分離 ---
     function scheduleNextEnemy() {
       if(gameState.status !== 'playing') return;
-      // バランス調整: 3秒〜5秒のランダムな間隔で敵が出現
       let delay = Math.random() * 2000 + 3000;
       spawnTimerId = setTimeout(() => {
         spawnEnemy();
@@ -266,7 +264,7 @@
       }
       
       if(moved) {
-        checkLines(); // 落下によってラインが揃うか判定
+        checkLines(); 
       }
     }
 
@@ -309,6 +307,7 @@
       }
 
       gameState.combo++;
+      gameState.lines += linesToClear.length; // ライン数を加算
       if(gameState.combo > gameState.maxCombo) gameState.maxCombo = gameState.combo;
       playSound('clear', gameState.combo);
       
@@ -433,9 +432,7 @@
     // --- UIと描画 ---
     function updateUI() {
       uiScore.textContent = gameState.score;
-      let m = Math.floor(gameState.timeLeft / 60);
-      let s = gameState.timeLeft % 60;
-      uiTime.textContent = `0${m}:${s<10?'0':''}${s}`;
+      uiLines.textContent = `${gameState.lines} LINES`;
       
       uiEnemyNext.innerHTML = spawnQueue.map(p => `<span style="color:#dcdcdc">${p}</span>`).join(' ');
       uiMyNext.textContent = myNextPiece;
@@ -508,11 +505,12 @@
 
     function endGame() {
       gameState.status = "gameover";
-      clearInterval(gravityTimerId); clearInterval(secondTimerId); clearTimeout(spawnTimerId);
+      clearInterval(gravityTimerId); clearInterval(checkStateTimerId); clearTimeout(spawnTimerId);
       
-      let rank = gameState.score >= 10000 ? "S" : gameState.score >= 5000 ? "A" : gameState.score >= 2000 ? "B" : "C";
-      document.getElementById('result-title').textContent = "TIME UP!";
+      let rank = gameState.score >= 20000 ? "S" : gameState.score >= 10000 ? "A" : gameState.score >= 5000 ? "B" : "C";
+      document.getElementById('result-title').textContent = "GAME OVER";
       document.getElementById('res-score').textContent = `Score: ${gameState.score}`;
+      document.getElementById('res-lines').textContent = `Lines Cleared: ${gameState.lines}`;
       document.getElementById('res-combo').textContent = `Max Combo: ${gameState.maxCombo}`;
       document.getElementById('res-rank').textContent = `Rank: ${rank}`;
       document.getElementById('result-details').style.display = 'block';
