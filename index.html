@@ -1,445 +1,189 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>将棋テトリス：昇天 (完全画面収まり編)</title>
-  <style>
-    /* 画面全体の設定：下部にセーフエリア（余白）を強制的に確保 */
-    html, body {
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      margin: 0; padding: 0;
-      /* iPhoneの下部バー（ホームインジケーター）を避けるための必須設定 */
-      padding-bottom: calc(env(safe-area-inset-bottom) + 20px); 
-      background-color: #222; color: #fff; font-family: 'Helvetica Neue', Arial, sans-serif;
-      display: flex; flex-direction: column; align-items: center;
-      touch-action: none; overscroll-behavior: none;
-      -webkit-text-size-adjust: 100%; user-select: none; -webkit-user-select: none;
-    }
-    #ui-header {
-      width: 100%; max-width: 400px; display: flex; justify-content: space-between; align-items: center;
-      padding: 10px; box-sizing: border-box; background: #1a1a1a; flex-shrink: 0; border-bottom: 2px solid #444;
-    }
-    .panel {
-      background: #444; border-radius: 8px; padding: 5px 10px; text-align: center; width: 60px; height: 60px;
-      display: flex; flex-direction: column; justify-content: center; border: 2px solid #555; cursor: pointer;
-    }
-    .panel:active { transform: scale(0.95); background: #555; }
-    .panel span { font-size: 10px; color: #aaa; pointer-events: none; }
-    .panel div { font-size: 24px; font-weight: bold; margin-top: 5px; color: #ffe6b3; pointer-events: none;}
-    #hold-btn { background: #5a4a3a; border-color: #d3a052; }
-    #next-btn { background: #3a4a5a; border-color: #52a0d3; }
-    
-    .center-info { display: flex; flex-direction: column; align-items: center; }
-    #score-display { font-size: 24px; font-weight: bold; color: #4caf50; text-shadow: 1px 1px 2px #000; }
-    #status-display { font-size: 12px; font-weight: bold; color: #ff9800; margin-top: 4px; }
-    
-    /* キャンバスを中央に配置し、上下に余裕をもたせる */
-    #canvas-container {
-      flex-grow: 1; display: flex; justify-content: center; align-items: center; 
-      width: 100%; padding: 10px; box-sizing: border-box;
-    }
-    canvas { background-color: #E2C275; box-shadow: 0 0 15px rgba(0,0,0,0.8); touch-action: none; border-radius: 4px; }
-    
-    #message-overlay {
-      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      font-size: 24px; font-weight: bold; color: #ffeb3b; text-shadow: 2px 2px 4px #000; 
-      display: none; text-align: center; pointer-events: none;
-      background: rgba(0,0,0,0.8); padding: 15px; border-radius: 10px; width: 80%; z-index: 10;
-    }
-  </style>
+<meta charset="UTF-8">
+<title>将棋テトリス昇天</title>
+<style>
+body { margin:0; background:#111; color:#fff; text-align:center; font-family:sans-serif;}
+#ui { padding:10px; }
+canvas { background:#222; touch-action:none; }
+</style>
 </head>
 <body>
 
-  <div id="ui-header">
-    <div id="hold-btn" class="panel"><span>HOLD(捕獲)</span><div id="hold-piece"></div></div>
-    <div class="center-info">
-      <div id="score-display">0 LINES</div>
-      <div id="status-display">敵襲来中...</div>
-    </div>
-    <div id="next-btn" class="panel"><span>NEXT</span><div id="next-piece">歩</div></div>
-  </div>
+<div id="ui">
+  <div>Score: <span id="score">0</span></div>
+  <div>Combo: <span id="combo">0</span></div>
+  <div>Time: <span id="time">180</span></div>
+</div>
 
-  <div id="canvas-container">
-    <canvas id="gameCanvas"></canvas>
-  </div>
-  <div id="message-overlay"></div>
+<canvas id="game"></canvas>
 
-  <script>
-    document.addEventListener('dblclick', function(e) { e.preventDefault(); }, { passive: false });
-    document.addEventListener('touchstart', function(e) {
-      if (e.touches.length > 1) { e.preventDefault(); }
-    }, { passive: false });
+<script>
+const COLS=5, ROWS=9;
+let board = Array.from({length:ROWS},()=>Array(COLS).fill(null));
 
-    const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d');
-    const scoreEl = document.getElementById('score-display');
-    const nextEl = document.getElementById('next-piece');
-    const holdEl = document.getElementById('hold-piece');
-    const holdBtn = document.getElementById('hold-btn');
-    const nextBtn = document.getElementById('next-btn');
-    const messageEl = document.getElementById('message-overlay');
+let canvas = document.getElementById("game");
+let ctx = canvas.getContext("2d");
+let size = 60;
+canvas.width = COLS*size;
+canvas.height = ROWS*size;
 
-    const COLS = 5;
-    const ROWS = 9;
-    let cellSize = 1;
+let score=0, combo=0, time=180;
+let spawnQueue=[];
 
-    const PIECE_TYPES = ['歩', '歩', '歩', '香', '桂'];
-    let board = Array(ROWS).fill(null).map(() => Array(COLS).fill(null));
-    let nextPiece = getRandomPiece();
-    let holdPiece = null;
-    let linesCleared = 0;
-    let gameState = 'playing';
-    
-    let selectedCell = null;
-    let validMoves = [];
-    let gravityTimer;
-    let spawnTimer;
+function randPiece(){
+  let types=["歩","香","桂"];
+  let t = Math.random()<0.08?"王":types[Math.floor(Math.random()*3)];
+  return {type:t, owner:"enemy", state:"falling", promoted:false};
+}
 
-    function resize() {
-      const header = document.getElementById('ui-header');
-      const safeBottom = parseInt(getComputedStyle(document.body).paddingBottom) || 20;
-      
-      // 絶対に画面からはみ出さないように、高さを「画面サイズ - ヘッダー - 下部セーフエリア - さらに40pxの余裕」で計算
-      const availableHeight = window.innerHeight - header.offsetHeight - safeBottom - 40;
-      const availableWidth = Math.min(window.innerWidth, 400) - 20;
+function initQueue(){
+  while(spawnQueue.length<2){
+    spawnQueue.push(randPiece());
+  }
+}
 
-      cellSize = Math.min(Math.floor(availableWidth / COLS), Math.floor(availableHeight / ROWS));
-      
-      canvas.width = cellSize * COLS;
-      canvas.height = cellSize * ROWS;
-      if(gameState === 'playing') draw();
+function spawnEnemy(){
+  let piece = spawnQueue.shift();
+  spawnQueue.push(randPiece());
+  let x=Math.floor(Math.random()*COLS);
+  if(board[0][x]) gameOver();
+  board[0][x]=piece;
+}
+
+function applyGravity(){
+  for(let y=ROWS-2;y>=0;y--){
+    for(let x=0;x<COLS;x++){
+      let c=board[y][x];
+      if(c && c.owner==="enemy" && c.state==="falling"){
+        if(!board[y+1][x]){
+          board[y+1][x]=c;
+          board[y][x]=null;
+        }else{
+          c.state="fixed";
+        }
+      }
     }
-    
-    window.addEventListener('resize', () => { setTimeout(resize, 100); });
-    window.addEventListener('orientationchange', () => { setTimeout(resize, 200); });
+  }
+}
 
-    function getRandomPiece() {
-      return PIECE_TYPES[Math.floor(Math.random() * PIECE_TYPES.length)];
+function applyLineEffect(y){
+  for(let x=0;x<COLS;x++){
+    let c=board[y][x];
+    if(!c) continue;
+
+    if(c.type==="香"){
+      for(let i=0;i<ROWS;i++) board[i][x]=null;
     }
 
-    function initBoard() {
-      for (let y = 3; y < 5; y++) {
-        for (let x = 0; x < COLS; x++) {
-          if (Math.random() < 0.3) {
-            board[y][x] = { type: getRandomPiece(), owner: 'enemy', state: 'fixed', promoted: false };
+    if(c.type==="桂"){
+      for(let dx=-1;dx<=1;dx++){
+        for(let dy=-1;dy<=1;dy++){
+          let nx=x+dx, ny=y+dy;
+          if(board[ny] && board[ny][nx]){
+            board[ny][nx]=null;
           }
         }
       }
     }
 
-    function draw() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      ctx.fillStyle = 'rgba(211, 47, 47, 0.15)';
-      ctx.fillRect(0, 0, canvas.width, cellSize * 3);
-      ctx.beginPath(); ctx.moveTo(0, cellSize * 3); ctx.lineTo(canvas.width, cellSize * 3);
-      ctx.strokeStyle = 'rgba(211, 47, 47, 0.5)'; ctx.lineWidth = 2; ctx.stroke();
-
-      ctx.strokeStyle = 'rgba(0,0,0,0.1)'; ctx.lineWidth = 1;
-      for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0, y * cellSize); ctx.lineTo(canvas.width, y * cellSize); ctx.stroke(); }
-      for (let x = 0; x <= COLS; x++) { ctx.beginPath(); ctx.moveTo(x * cellSize, 0); ctx.lineTo(x * cellSize, canvas.height); ctx.stroke(); }
-
-      if (selectedCell === 'next') {
-        ctx.fillStyle = 'rgba(76, 175, 80, 0.4)';
-        ctx.fillRect(0, cellSize * (ROWS - 1), canvas.width, cellSize);
-      }
-
-      ctx.fillStyle = 'rgba(33, 150, 243, 0.5)';
-      validMoves.forEach(m => {
-        if (board[m.y][m.x] && board[m.y][m.x].owner === 'enemy') {
-           ctx.fillStyle = 'rgba(244, 67, 54, 0.6)';
-           ctx.fillRect(m.x * cellSize, m.y * cellSize, cellSize, cellSize);
-           ctx.fillStyle = 'rgba(33, 150, 243, 0.5)';
-        } else {
-           ctx.fillRect(m.x * cellSize, m.y * cellSize, cellSize, cellSize);
-        }
-      });
-
-      if (selectedCell && selectedCell !== 'next') {
-        ctx.fillStyle = 'rgba(255, 235, 59, 0.6)';
-        ctx.fillRect(selectedCell.x * cellSize, selectedCell.y * cellSize, cellSize, cellSize);
-      }
-
-      for (let y = 0; y < ROWS; y++) {
-        for (let x = 0; x < COLS; x++) {
-          const p = board[y][x];
-          if (p) {
-            const px = x * cellSize + cellSize / 2;
-            const py = y * cellSize + cellSize / 2;
-            
-            ctx.save();
-            ctx.translate(px, py);
-            
-            if (p.owner === 'enemy') ctx.rotate(Math.PI);
-            
-            ctx.beginPath();
-            ctx.moveTo(0, -cellSize*0.4);
-            ctx.lineTo(cellSize*0.35, -cellSize*0.1);
-            ctx.lineTo(cellSize*0.3, cellSize*0.4);
-            ctx.lineTo(-cellSize*0.3, cellSize*0.4);
-            ctx.lineTo(-cellSize*0.35, -cellSize*0.1);
-            ctx.closePath();
-            
-            if (p.type === '王') ctx.fillStyle = '#ffb3b3';
-            else if (p.owner === 'enemy') ctx.fillStyle = '#dcdcdc'; 
-            else ctx.fillStyle = p.promoted ? '#ffdd99' : '#ffe6b3'; 
-            
-            ctx.fill();
-            
-            if (p.state === 'falling') {
-              ctx.strokeStyle = '#ff9800'; ctx.lineWidth = 3;
-            } else {
-              ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
-            }
-            ctx.stroke();
-
-            ctx.fillStyle = (p.promoted || p.type === '王') ? '#d32f2f' : '#000';
-            ctx.font = `bold ${cellSize * 0.4}px sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            let text = p.promoted && p.owner === 'player' ? '成' : p.type;
-            ctx.fillText(text, 0, 0);
-            
-            ctx.restore();
-          }
+    if(c.type==="王"){
+      for(let yy=0;yy<ROWS;yy++){
+        for(let xx=0;xx<COLS;xx++){
+          if(board[yy][xx]?.owner==="enemy") board[yy][xx]=null;
         }
       }
     }
+  }
+}
 
-    function getValidMoves(x, y) {
-      const p = board[y][x];
-      let moves = [];
-      if (!p || p.owner !== 'player') return moves;
+function checkLines(){
+  let cleared=0;
 
-      const canMoveTo = (nx, ny) => {
-        if (nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS) {
-          const target = board[ny][nx];
-          if (!target || target.owner === 'enemy') return true;
-        }
-        return false;
-      };
-
-      if (p.promoted) {
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            if (dx === 0 && dy === 0) continue;
-            if (canMoveTo(x + dx, y + dy)) moves.push({x: x + dx, y: y + dy});
-          }
-        }
-        return moves;
-      }
-
-      if (p.type === '歩') {
-        if (canMoveTo(x, y - 1)) moves.push({x: x, y: y - 1});
-      } else if (p.type === '香') {
-        for (let ny = y - 1; ny >= 0; ny--) {
-          if (canMoveTo(x, ny)) {
-            moves.push({x: x, y: ny});
-            if (board[ny][x] && board[ny][x].owner === 'enemy') break;
-          } else break;
-        }
-      } else if (p.type === '桂') {
-        if (canMoveTo(x - 1, y - 2)) moves.push({x: x - 1, y: y - 2});
-        if (canMoveTo(x + 1, y - 2)) moves.push({x: x + 1, y: y - 2});
-      }
-      return moves;
+  for(let y=ROWS-1;y>=0;y--){
+    if(board[y].every(c=>c)){
+      applyLineEffect(y);
+      board.splice(y,1);
+      board.unshift(Array(COLS).fill(null));
+      cleared++;
+      y++;
     }
+  }
 
-    function triggerKingBonus() {
-      showMessage("王将撃破！<br>全消しボーナス！");
-      for (let y = 0; y < ROWS; y++) {
-        for (let x = 0; x < COLS; x++) {
-          if (board[y][x] && board[y][x].owner === 'enemy') board[y][x] = null;
-        }
+  if(cleared>0){
+    combo++;
+    let base=[0,100,300,600][cleared]||1000;
+    let mult = combo>=3?2:(combo===2?1.5:1);
+    score += Math.floor(base*mult);
+  }else{
+    combo=0;
+  }
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  for(let y=0;y<ROWS;y++){
+    for(let x=0;x<COLS;x++){
+      ctx.strokeStyle="#555";
+      ctx.strokeRect(x*size,y*size,size,size);
+
+      let c=board[y][x];
+      if(c){
+        ctx.fillStyle=c.owner==="enemy"?"#f55":"#5af";
+        ctx.fillRect(x*size+5,y*size+5,size-10,size-10);
+
+        ctx.fillStyle="#000";
+        ctx.fillText(c.type,x*size+20,y*size+35);
       }
     }
+  }
 
-    function checkLines() {
-      let clearedAny = false;
-      let hasKing = false;
+  document.getElementById("score").textContent=score;
+  document.getElementById("combo").textContent=combo;
+  document.getElementById("time").textContent=time;
+}
 
-      for (let y = ROWS - 1; y >= 0; y--) {
-        let isFull = true;
-        let rowHasKing = false;
-        for (let x = 0; x < COLS; x++) {
-          if (!board[y][x]) { isFull = false; break; }
-          if (board[y][x].type === '王') rowHasKing = true;
-        }
+function gameLoop(){
+  applyGravity();
+  checkLines();
+  draw();
+}
 
-        if (isFull) {
-          clearedAny = true;
-          linesCleared++;
-          if (rowHasKing) hasKing = true;
+function gameOver(){
+  alert("GAME OVER\nScore:"+score);
+  location.reload();
+}
 
-          for (let shiftY = y; shiftY > 0; shiftY--) {
-            for (let x = 0; x < COLS; x++) board[shiftY][x] = board[shiftY - 1][x];
-          }
-          for (let x = 0; x < COLS; x++) board[0][x] = null;
-          y++; 
-        }
-      }
+canvas.addEventListener("click",(e)=>{
+  let rect=canvas.getBoundingClientRect();
+  let x=Math.floor((e.clientX-rect.left)/size);
 
-      if (clearedAny) {
-        scoreEl.textContent = `${linesCleared} LINES`;
-        if (hasKing) triggerKingBonus();
-        draw();
-      }
+  for(let y=ROWS-1;y>=0;y--){
+    if(!board[y][x]){
+      board[y][x]={type:"歩",owner:"player",state:"fixed",promoted:false};
+      break;
     }
+  }
+});
 
-    function showMessage(msg) {
-      messageEl.innerHTML = msg;
-      messageEl.style.display = 'block';
-      setTimeout(() => { messageEl.style.display = 'none'; }, 1500);
-    }
+setInterval(()=>{
+  spawnEnemy();
+},3000);
 
-    function applyGravity() {
-      if (gameState !== 'playing') return;
-      let moved = false;
-      
-      for (let y = ROWS - 2; y >= 0; y--) {
-        for (let x = 0; x < COLS; x++) {
-          let p = board[y][x];
-          if (p && p.owner === 'enemy' && p.state === 'falling') {
-            if (!board[y+1][x]) {
-              board[y+1][x] = p;
-              board[y][x] = null;
-              moved = true;
-            } else {
-              p.state = 'fixed';
-              moved = true;
-            }
-          }
-        }
-      }
-      
-      for (let x = 0; x < COLS; x++) {
-        let p = board[ROWS-1][x];
-        if (p && p.owner === 'enemy' && p.state === 'falling') {
-          p.state = 'fixed'; moved = true;
-        }
-      }
-      if (moved) draw();
-    }
+setInterval(()=>{
+  gameLoop();
+},500);
 
-    function scheduleNextEnemy() {
-      if (gameState !== 'playing') return;
-      let delay = Math.random() * 2000 + 3000;
-      spawnTimer = setTimeout(() => {
-        spawnEnemy();
-        scheduleNextEnemy();
-      }, delay);
-    }
+setInterval(()=>{
+  time--;
+  if(time<=0) gameOver();
+},1000);
 
-    function spawnEnemy() {
-      if (gameState !== 'playing') return;
-      const col = Math.floor(Math.random() * COLS);
-      
-      if (!board[0][col]) {
-        const isKing = Math.random() < 0.08;
-        const type = isKing ? '王' : getRandomPiece(); 
-        board[0][col] = { type: type, owner: 'enemy', state: 'falling', promoted: false };
-        draw();
-      }
-    }
+initQueue();
+draw();
+</script>
 
-    function performAction() {
-      checkLines();
-      selectedCell = null;
-      validMoves = [];
-      draw();
-    }
-
-    nextBtn.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      if (gameState !== 'playing') return;
-      selectedCell = 'next';
-      validMoves = [];
-      draw();
-    });
-
-    holdBtn.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      if (gameState !== 'playing') return;
-      if (holdPiece === null) {
-        holdPiece = nextPiece;
-        nextPiece = getRandomPiece();
-      } else {
-        const temp = nextPiece;
-        nextPiece = holdPiece;
-        holdPiece = temp;
-      }
-      nextEl.textContent = nextPiece;
-      holdEl.textContent = holdPiece;
-      selectedCell = null;
-      draw();
-    });
-
-    canvas.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      if (gameState !== 'playing') return;
-      
-      const rect = canvas.getBoundingClientRect();
-      const x = Math.floor((e.clientX - rect.left) / cellSize);
-      const y = Math.floor((e.clientY - rect.top) / cellSize);
-
-      if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return;
-
-      if (selectedCell === 'next') {
-        if (!board[ROWS - 1][x]) {
-          board[ROWS - 1][x] = { type: nextPiece, owner: 'player', state: 'fixed', promoted: false };
-          nextPiece = getRandomPiece();
-          nextEl.textContent = nextPiece;
-          performAction();
-        } else {
-          selectedCell = null;
-          draw();
-        }
-        return;
-      }
-
-      const move = validMoves.find(m => m.x === x && m.y === y);
-      if (move && selectedCell) {
-        const target = board[y][x];
-        if (target && target.owner === 'enemy') {
-           if (target.type === '王') {
-             triggerKingBonus();
-           } else {
-             holdPiece = target.type;
-             holdEl.textContent = holdPiece;
-             showMessage(`${target.type} を捕獲！`);
-           }
-        }
-        
-        const p = board[selectedCell.y][selectedCell.x];
-        board[y][x] = p;
-        board[selectedCell.y][selectedCell.x] = null;
-        if (y <= 2) p.promoted = true;
-        
-        performAction();
-        return;
-      }
-
-      if (board[y][x] && board[y][x].owner === 'player') {
-        selectedCell = { x, y };
-        validMoves = getValidMoves(x, y);
-        draw();
-      } else {
-        selectedCell = null;
-        validMoves = [];
-        draw();
-      }
-    });
-
-    setTimeout(() => {
-      resize();
-      initBoard();
-      draw();
-      gravityTimer = setInterval(applyGravity, 1000);
-      scheduleNextEnemy();
-    }, 100);
-
-  </script>
 </body>
 </html>
