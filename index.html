@@ -3,27 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>将棋テトリス：昇天 (個別落下・迎撃編)</title>
+  <title>将棋テトリス：昇天 (持ち駒ルール編)</title>
   <style>
     html, body {
-      margin: 0; padding: 0;
-      height: 100%; height: 100dvh;
-      overflow: hidden;
-      background-color: #222; color: #fff;
-      font-family: 'Helvetica Neue', Arial, sans-serif;
+      margin: 0; padding: 0; height: 100%; height: 100dvh; overflow: hidden;
+      background-color: #222; color: #fff; font-family: 'Helvetica Neue', Arial, sans-serif;
       display: flex; flex-direction: column; align-items: center;
     }
     #ui-header {
-      width: 100%; max-width: 400px;
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 10px; box-sizing: border-box; background: #1a1a1a;
-      flex-shrink: 0; border-bottom: 2px solid #444;
+      width: 100%; max-width: 400px; display: flex; justify-content: space-between; align-items: center;
+      padding: 10px; box-sizing: border-box; background: #1a1a1a; flex-shrink: 0; border-bottom: 2px solid #444;
     }
     .panel {
-      background: #444; border-radius: 8px; padding: 5px 10px;
-      text-align: center; width: 60px; height: 60px;
-      display: flex; flex-direction: column; justify-content: center;
-      border: 2px solid #555;
+      background: #444; border-radius: 8px; padding: 5px 10px; text-align: center; width: 60px; height: 60px;
+      display: flex; flex-direction: column; justify-content: center; border: 2px solid #555;
       cursor: pointer; user-select: none; -webkit-user-select: none;
     }
     .panel:active { transform: scale(0.95); background: #555; }
@@ -39,21 +32,20 @@
     #canvas-container {
       flex-grow: 1; display: flex; justify-content: center; align-items: center; width: 100%;
     }
-    canvas {
-      background-color: #E2C275; box-shadow: 0 0 15px rgba(0,0,0,0.8); touch-action: none;
-    }
+    canvas { background-color: #E2C275; box-shadow: 0 0 15px rgba(0,0,0,0.8); touch-action: none; }
+    
     #message-overlay {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      font-size: 32px; font-weight: bold; color: #ffeb3b;
-      text-shadow: 2px 2px 4px #000; display: none; text-align: center; pointer-events: none;
-      background: rgba(0,0,0,0.8); padding: 20px; border-radius: 10px; width: 80%; z-index: 10;
+      font-size: 24px; font-weight: bold; color: #ffeb3b; text-shadow: 2px 2px 4px #000; 
+      display: none; text-align: center; pointer-events: none;
+      background: rgba(0,0,0,0.8); padding: 15px; border-radius: 10px; width: 80%; z-index: 10;
     }
   </style>
 </head>
 <body>
 
   <div id="ui-header">
-    <div id="hold-btn" class="panel"><span>HOLD</span><div id="hold-piece"></div></div>
+    <div id="hold-btn" class="panel"><span>HOLD(捕獲)</span><div id="hold-piece"></div></div>
     <div class="center-info">
       <div id="score-display">0 LINES</div>
       <div id="status-display">敵襲来中...</div>
@@ -89,7 +81,6 @@
     
     let selectedCell = null;
     let validMoves = [];
-
     let gravityTimer;
     let spawnTimer;
 
@@ -97,10 +88,7 @@
       const container = document.getElementById('canvas-container');
       const availableHeight = container.clientHeight - 10;
       const availableWidth = Math.min(window.innerWidth, 400);
-      const cellSizeW = Math.floor(availableWidth / COLS);
-      const cellSizeH = Math.floor(availableHeight / ROWS);
-      
-      cellSize = Math.min(cellSizeW, cellSizeH);
+      cellSize = Math.min(Math.floor(availableWidth / COLS), Math.floor(availableHeight / ROWS));
       canvas.width = cellSize * COLS;
       canvas.height = cellSize * ROWS;
       if(gameState === 'playing') draw();
@@ -112,10 +100,11 @@
     }
 
     function initBoard() {
-      // 最初は真ん中あたりに固定の障害物をいくつか配置
       for (let y = 3; y < 5; y++) {
         for (let x = 0; x < COLS; x++) {
-          if (Math.random() < 0.3) board[y][x] = { type: 'block', owner: 'enemy', state: 'fixed', promoted: false };
+          if (Math.random() < 0.3) {
+            board[y][x] = { type: getRandomPiece(), owner: 'enemy', state: 'fixed', promoted: false };
+          }
         }
       }
     }
@@ -123,37 +112,24 @@
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 成りゾーン（上3段）
       ctx.fillStyle = 'rgba(211, 47, 47, 0.15)';
       ctx.fillRect(0, 0, canvas.width, cellSize * 3);
-      ctx.beginPath();
-      ctx.moveTo(0, cellSize * 3);
-      ctx.lineTo(canvas.width, cellSize * 3);
-      ctx.strokeStyle = 'rgba(211, 47, 47, 0.5)';
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, cellSize * 3); ctx.lineTo(canvas.width, cellSize * 3);
+      ctx.strokeStyle = 'rgba(211, 47, 47, 0.5)'; ctx.lineWidth = 2; ctx.stroke();
 
-      // グリッド
-      ctx.strokeStyle = 'rgba(0,0,0,0.1)';
-      ctx.lineWidth = 1;
-      for (let y = 0; y <= ROWS; y++) {
-        ctx.beginPath(); ctx.moveTo(0, y * cellSize); ctx.lineTo(canvas.width, y * cellSize); ctx.stroke();
-      }
-      for (let x = 0; x <= COLS; x++) {
-        ctx.beginPath(); ctx.moveTo(x * cellSize, 0); ctx.lineTo(x * cellSize, canvas.height); ctx.stroke();
-      }
+      ctx.strokeStyle = 'rgba(0,0,0,0.1)'; ctx.lineWidth = 1;
+      for (let y = 0; y <= ROWS; y++) { ctx.beginPath(); ctx.moveTo(0, y * cellSize); ctx.lineTo(canvas.width, y * cellSize); ctx.stroke(); }
+      for (let x = 0; x <= COLS; x++) { ctx.beginPath(); ctx.moveTo(x * cellSize, 0); ctx.lineTo(x * cellSize, canvas.height); ctx.stroke(); }
 
-      // 選択ハイライト（Next）
       if (selectedCell === 'next') {
         ctx.fillStyle = 'rgba(76, 175, 80, 0.4)';
         ctx.fillRect(0, cellSize * (ROWS - 1), canvas.width, cellSize);
       }
 
-      // 攻撃・移動可能ハイライト
       ctx.fillStyle = 'rgba(33, 150, 243, 0.5)';
       validMoves.forEach(m => {
         if (board[m.y][m.x] && board[m.y][m.x].owner === 'enemy') {
-           ctx.fillStyle = 'rgba(244, 67, 54, 0.6)'; // 敵がいるマスは赤
+           ctx.fillStyle = 'rgba(244, 67, 54, 0.6)';
            ctx.fillRect(m.x * cellSize, m.y * cellSize, cellSize, cellSize);
            ctx.fillStyle = 'rgba(33, 150, 243, 0.5)';
         } else {
@@ -161,13 +137,11 @@
         }
       });
 
-      // 選択中の自駒ハイライト
       if (selectedCell && selectedCell !== 'next') {
         ctx.fillStyle = 'rgba(255, 235, 59, 0.6)';
         ctx.fillRect(selectedCell.x * cellSize, selectedCell.y * cellSize, cellSize, cellSize);
       }
 
-      // 駒の描画
       for (let y = 0; y < ROWS; y++) {
         for (let x = 0; x < COLS; x++) {
           const p = board[y][x];
@@ -175,45 +149,41 @@
             const px = x * cellSize + cellSize / 2;
             const py = y * cellSize + cellSize / 2;
             
+            ctx.save();
+            ctx.translate(px, py);
+            
+            // 敵の駒は180度回転させて逆さにする
+            if (p.owner === 'enemy') ctx.rotate(Math.PI);
+            
             ctx.beginPath();
-            if (p.owner === 'player') {
-              // 自駒（将棋の駒型）
-              ctx.moveTo(px, py - cellSize*0.4);
-              ctx.lineTo(px + cellSize*0.35, py - cellSize*0.1);
-              ctx.lineTo(px + cellSize*0.3, py + cellSize*0.4);
-              ctx.lineTo(px - cellSize*0.3, py + cellSize*0.4);
-              ctx.lineTo(px - cellSize*0.35, py - cellSize*0.1);
-            } else {
-              // 敵ブロック（四角）
-              ctx.rect(px - cellSize*0.4, py - cellSize*0.4, cellSize*0.8, cellSize*0.8);
-            }
+            ctx.moveTo(0, -cellSize*0.4);
+            ctx.lineTo(cellSize*0.35, -cellSize*0.1);
+            ctx.lineTo(cellSize*0.3, cellSize*0.4);
+            ctx.lineTo(-cellSize*0.3, cellSize*0.4);
+            ctx.lineTo(-cellSize*0.35, -cellSize*0.1);
             ctx.closePath();
             
-            // 色分け（落下中は少し明るい色で点滅風にしても良いが、今回はシンプルに）
-            if (p.type === 'block') ctx.fillStyle = '#666';
-            else if (p.type === '王') ctx.fillStyle = '#ff6b6b';
-            else ctx.fillStyle = p.promoted ? '#ffdd99' : '#ffe6b3';
+            if (p.type === '王') ctx.fillStyle = '#ffb3b3';
+            else if (p.owner === 'enemy') ctx.fillStyle = '#dcdcdc'; // 敵は少し灰色っぽい
+            else ctx.fillStyle = p.promoted ? '#ffdd99' : '#ffe6b3'; // 味方
+            
             ctx.fill();
-            ctx.strokeStyle = '#222';
-            ctx.lineWidth = 2;
+            
+            if (p.state === 'falling') {
+              ctx.strokeStyle = '#ff9800'; ctx.lineWidth = 3;
+            } else {
+              ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
+            }
             ctx.stroke();
 
-            // 落下中の敵には分かりやすいようにエフェクト（枠線を赤く太く）
-            if (p.state === 'falling') {
-              ctx.strokeStyle = '#ff9800';
-              ctx.lineWidth = 3;
-              ctx.stroke();
-            }
-
-            let text = p.type;
-            if (p.promoted && p.owner === 'player') text = '成';
-            if (p.type === 'block') text = '';
-            
             ctx.fillStyle = (p.promoted || p.type === '王') ? '#d32f2f' : '#000';
             ctx.font = `bold ${cellSize * 0.4}px sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(text, px, py);
+            let text = p.promoted && p.owner === 'player' ? '成' : p.type;
+            ctx.fillText(text, 0, 0);
+            
+            ctx.restore();
           }
         }
       }
@@ -248,7 +218,7 @@
         for (let ny = y - 1; ny >= 0; ny--) {
           if (canMoveTo(x, ny)) {
             moves.push({x: x, y: ny});
-            if (board[ny][x] && board[ny][x].owner === 'enemy') break; // 敵に当たったら止まる（貫通しない）
+            if (board[ny][x] && board[ny][x].owner === 'enemy') break;
           } else break;
         }
       } else if (p.type === '桂') {
@@ -259,12 +229,10 @@
     }
 
     function triggerKingBonus() {
-      showMessage("王将撃破！<br>大爆発ボーナス！");
+      showMessage("王将撃破！<br>全消しボーナス！");
       for (let y = 0; y < ROWS; y++) {
         for (let x = 0; x < COLS; x++) {
-          if (board[y][x] && board[y][x].owner === 'enemy') {
-            board[y][x] = null; // 全消滅
-          }
+          if (board[y][x] && board[y][x].owner === 'enemy') board[y][x] = null;
         }
       }
     }
@@ -286,12 +254,11 @@
           linesCleared++;
           if (rowHasKing) hasKing = true;
 
-          // ラインが消えたら、その上のブロックを一段落とす
           for (let shiftY = y; shiftY > 0; shiftY--) {
             for (let x = 0; x < COLS; x++) board[shiftY][x] = board[shiftY - 1][x];
           }
           for (let x = 0; x < COLS; x++) board[0][x] = null;
-          y++; // 連鎖判定のため同じ行を再チェック
+          y++; 
         }
       }
 
@@ -305,27 +272,22 @@
     function showMessage(msg) {
       messageEl.innerHTML = msg;
       messageEl.style.display = 'block';
-      setTimeout(() => { messageEl.style.display = 'none'; }, 2000);
+      setTimeout(() => { messageEl.style.display = 'none'; }, 1500);
     }
 
-    // --- 敵の個別落下処理 ---
     function applyGravity() {
       if (gameState !== 'playing') return;
       let moved = false;
       
-      // 下から順に処理（落下中の敵だけを対象に）
       for (let y = ROWS - 2; y >= 0; y--) {
         for (let x = 0; x < COLS; x++) {
           let p = board[y][x];
-          // 落下状態の敵駒を見つけた場合
           if (p && p.owner === 'enemy' && p.state === 'falling') {
-            // 一つ下が空いていれば落ちる
             if (!board[y+1][x]) {
               board[y+1][x] = p;
               board[y][x] = null;
               moved = true;
             } else {
-              // 下に何かしらのブロックや自駒があったら固定される
               p.state = 'fixed';
               moved = true;
             }
@@ -333,22 +295,17 @@
         }
       }
       
-      // 一番下（ROWS-1）に到達した落下中の駒も固定する
       for (let x = 0; x < COLS; x++) {
         let p = board[ROWS-1][x];
         if (p && p.owner === 'enemy' && p.state === 'falling') {
-          p.state = 'fixed';
-          moved = true;
+          p.state = 'fixed'; moved = true;
         }
       }
-
       if (moved) draw();
     }
 
-    // --- 敵の出現処理 ---
     function scheduleNextEnemy() {
       if (gameState !== 'playing') return;
-      // 1.5秒〜3秒の間隔で降ってくる
       let delay = Math.random() * 1500 + 1500;
       spawnTimer = setTimeout(() => {
         spawnEnemy();
@@ -360,11 +317,10 @@
       if (gameState !== 'playing') return;
       const col = Math.floor(Math.random() * COLS);
       
-      // 一番上がすでに埋まっていたら何もしない（溢れたらゲームオーバーにしても良い）
       if (!board[0][col]) {
-        const isKing = Math.random() < 0.1;
-        // stateを 'falling' にして生成
-        board[0][col] = { type: isKing ? '王' : 'block', owner: 'enemy', state: 'falling', promoted: false };
+        const isKing = Math.random() < 0.08;
+        const type = isKing ? '王' : getRandomPiece(); // ランダムな将棋の駒が降ってくる
+        board[0][col] = { type: type, owner: 'enemy', state: 'falling', promoted: false };
         draw();
       }
     }
@@ -427,8 +383,16 @@
       const move = validMoves.find(m => m.x === x && m.y === y);
       if (move && selectedCell) {
         const target = board[y][x];
+        // --- 敵を捕獲する処理 ---
         if (target && target.owner === 'enemy') {
-           if (target.type === '王') triggerKingBonus();
+           if (target.type === '王') {
+             triggerKingBonus();
+           } else {
+             // 王将以外なら、倒した敵の駒を「HOLD（持ち駒）」にストック！
+             holdPiece = target.type;
+             holdEl.textContent = holdPiece;
+             showMessage(`${target.type} を捕獲！`);
+           }
         }
         
         const p = board[selectedCell.y][selectedCell.x];
@@ -455,7 +419,6 @@
       resize();
       initBoard();
       draw();
-      // 0.5秒ごとに落下処理
       gravityTimer = setInterval(applyGravity, 500);
       scheduleNextEnemy();
     }, 100);
