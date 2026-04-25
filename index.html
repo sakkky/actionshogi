@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>将棋テトリス：昇天 (リアルタイムアクション)</title>
+  <title>将棋テトリス：昇天 (個別落下・迎撃編)</title>
   <style>
     html, body {
       margin: 0; padding: 0;
@@ -34,8 +34,7 @@
     
     .center-info { display: flex; flex-direction: column; align-items: center; }
     #score-display { font-size: 24px; font-weight: bold; color: #4caf50; text-shadow: 1px 1px 2px #000; }
-    #status-display { font-size: 12px; font-weight: bold; color: #ff5252; margin-top: 4px; animation: pulse 1s infinite; }
-    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    #status-display { font-size: 12px; font-weight: bold; color: #ff9800; margin-top: 4px; }
     
     #canvas-container {
       flex-grow: 1; display: flex; justify-content: center; align-items: center; width: 100%;
@@ -57,7 +56,7 @@
     <div id="hold-btn" class="panel"><span>HOLD</span><div id="hold-piece"></div></div>
     <div class="center-info">
       <div id="score-display">0 LINES</div>
-      <div id="status-display">▶ 敵襲来中...</div>
+      <div id="status-display">敵襲来中...</div>
     </div>
     <div id="next-btn" class="panel"><span>NEXT</span><div id="next-piece">歩</div></div>
   </div>
@@ -91,7 +90,6 @@
     let selectedCell = null;
     let validMoves = [];
 
-    // リアルタイムタイマー
     let gravityTimer;
     let spawnTimer;
 
@@ -114,15 +112,18 @@
     }
 
     function initBoard() {
-      // 最初は少しだけブロックを配置
-      for (let x = 0; x < COLS; x++) {
-        if (Math.random() < 0.5) board[2][x] = { type: 'block', owner: 'enemy', promoted: false };
+      // 最初は真ん中あたりに固定の障害物をいくつか配置
+      for (let y = 3; y < 5; y++) {
+        for (let x = 0; x < COLS; x++) {
+          if (Math.random() < 0.3) board[y][x] = { type: 'block', owner: 'enemy', state: 'fixed', promoted: false };
+        }
       }
     }
 
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      // 成りゾーン（上3段）
       ctx.fillStyle = 'rgba(211, 47, 47, 0.15)';
       ctx.fillRect(0, 0, canvas.width, cellSize * 3);
       ctx.beginPath();
@@ -132,6 +133,7 @@
       ctx.lineWidth = 2;
       ctx.stroke();
 
+      // グリッド
       ctx.strokeStyle = 'rgba(0,0,0,0.1)';
       ctx.lineWidth = 1;
       for (let y = 0; y <= ROWS; y++) {
@@ -141,28 +143,31 @@
         ctx.beginPath(); ctx.moveTo(x * cellSize, 0); ctx.lineTo(x * cellSize, canvas.height); ctx.stroke();
       }
 
+      // 選択ハイライト（Next）
       if (selectedCell === 'next') {
         ctx.fillStyle = 'rgba(76, 175, 80, 0.4)';
         ctx.fillRect(0, cellSize * (ROWS - 1), canvas.width, cellSize);
       }
 
+      // 攻撃・移動可能ハイライト
       ctx.fillStyle = 'rgba(33, 150, 243, 0.5)';
       validMoves.forEach(m => {
-        // 敵がいるマスは攻撃色にする
         if (board[m.y][m.x] && board[m.y][m.x].owner === 'enemy') {
-           ctx.fillStyle = 'rgba(244, 67, 54, 0.6)'; // 赤
+           ctx.fillStyle = 'rgba(244, 67, 54, 0.6)'; // 敵がいるマスは赤
            ctx.fillRect(m.x * cellSize, m.y * cellSize, cellSize, cellSize);
-           ctx.fillStyle = 'rgba(33, 150, 243, 0.5)'; // 青に戻す
+           ctx.fillStyle = 'rgba(33, 150, 243, 0.5)';
         } else {
            ctx.fillRect(m.x * cellSize, m.y * cellSize, cellSize, cellSize);
         }
       });
 
+      // 選択中の自駒ハイライト
       if (selectedCell && selectedCell !== 'next') {
         ctx.fillStyle = 'rgba(255, 235, 59, 0.6)';
         ctx.fillRect(selectedCell.x * cellSize, selectedCell.y * cellSize, cellSize, cellSize);
       }
 
+      // 駒の描画
       for (let y = 0; y < ROWS; y++) {
         for (let x = 0; x < COLS; x++) {
           const p = board[y][x];
@@ -172,16 +177,19 @@
             
             ctx.beginPath();
             if (p.owner === 'player') {
+              // 自駒（将棋の駒型）
               ctx.moveTo(px, py - cellSize*0.4);
               ctx.lineTo(px + cellSize*0.35, py - cellSize*0.1);
               ctx.lineTo(px + cellSize*0.3, py + cellSize*0.4);
               ctx.lineTo(px - cellSize*0.3, py + cellSize*0.4);
               ctx.lineTo(px - cellSize*0.35, py - cellSize*0.1);
             } else {
+              // 敵ブロック（四角）
               ctx.rect(px - cellSize*0.4, py - cellSize*0.4, cellSize*0.8, cellSize*0.8);
             }
             ctx.closePath();
             
+            // 色分け（落下中は少し明るい色で点滅風にしても良いが、今回はシンプルに）
             if (p.type === 'block') ctx.fillStyle = '#666';
             else if (p.type === '王') ctx.fillStyle = '#ff6b6b';
             else ctx.fillStyle = p.promoted ? '#ffdd99' : '#ffe6b3';
@@ -189,6 +197,13 @@
             ctx.strokeStyle = '#222';
             ctx.lineWidth = 2;
             ctx.stroke();
+
+            // 落下中の敵には分かりやすいようにエフェクト（枠線を赤く太く）
+            if (p.state === 'falling') {
+              ctx.strokeStyle = '#ff9800';
+              ctx.lineWidth = 3;
+              ctx.stroke();
+            }
 
             let text = p.type;
             if (p.promoted && p.owner === 'player') text = '成';
@@ -204,7 +219,6 @@
       }
     }
 
-    // 敵への攻撃（移動）を含めた移動可能判定
     function getValidMoves(x, y) {
       const p = board[y][x];
       let moves = [];
@@ -213,7 +227,6 @@
       const canMoveTo = (nx, ny) => {
         if (nx >= 0 && nx < COLS && ny >= 0 && ny < ROWS) {
           const target = board[ny][nx];
-          // 空いているか、敵がいる場合は移動（攻撃）可能！
           if (!target || target.owner === 'enemy') return true;
         }
         return false;
@@ -235,7 +248,7 @@
         for (let ny = y - 1; ny >= 0; ny--) {
           if (canMoveTo(x, ny)) {
             moves.push({x: x, y: ny});
-            if (board[ny][x] && board[ny][x].owner === 'enemy') break; // 敵を貫通はできず、そこで止まる（捕獲）
+            if (board[ny][x] && board[ny][x].owner === 'enemy') break; // 敵に当たったら止まる（貫通しない）
           } else break;
         }
       } else if (p.type === '桂') {
@@ -245,13 +258,12 @@
       return moves;
     }
 
-    // 王将を破壊したときのボーナス
     function triggerKingBonus() {
       showMessage("王将撃破！<br>大爆発ボーナス！");
       for (let y = 0; y < ROWS; y++) {
         for (let x = 0; x < COLS; x++) {
           if (board[y][x] && board[y][x].owner === 'enemy') {
-            board[y][x] = null; // 敵ブロック全消滅
+            board[y][x] = null; // 全消滅
           }
         }
       }
@@ -274,19 +286,18 @@
           linesCleared++;
           if (rowHasKing) hasKing = true;
 
+          // ラインが消えたら、その上のブロックを一段落とす
           for (let shiftY = y; shiftY > 0; shiftY--) {
             for (let x = 0; x < COLS; x++) board[shiftY][x] = board[shiftY - 1][x];
           }
           for (let x = 0; x < COLS; x++) board[0][x] = null;
-          y++;
+          y++; // 連鎖判定のため同じ行を再チェック
         }
       }
 
       if (clearedAny) {
         scoreEl.textContent = `${linesCleared} LINES`;
-        if (hasKing) {
-          triggerKingBonus();
-        }
+        if (hasKing) triggerKingBonus();
         draw();
       }
     }
@@ -297,39 +308,48 @@
       setTimeout(() => { messageEl.style.display = 'none'; }, 2000);
     }
 
-    function gameOver() {
-      gameState = 'gameover';
-      showMessage("GAME OVER<br>画面が埋まりました");
-      clearTimeout(spawnTimer);
-      clearInterval(gravityTimer);
-    }
-
-    // --- リアルタイム：敵の自動降下（重力） ---
+    // --- 敵の個別落下処理 ---
     function applyGravity() {
       if (gameState !== 'playing') return;
       let moved = false;
-      // 下から順に、敵ブロックを1段ずつ落とす
+      
+      // 下から順に処理（落下中の敵だけを対象に）
       for (let y = ROWS - 2; y >= 0; y--) {
         for (let x = 0; x < COLS; x++) {
           let p = board[y][x];
-          if (p && p.owner === 'enemy') {
-            // 下が空いていれば落ちる
+          // 落下状態の敵駒を見つけた場合
+          if (p && p.owner === 'enemy' && p.state === 'falling') {
+            // 一つ下が空いていれば落ちる
             if (!board[y+1][x]) {
               board[y+1][x] = p;
               board[y][x] = null;
+              moved = true;
+            } else {
+              // 下に何かしらのブロックや自駒があったら固定される
+              p.state = 'fixed';
               moved = true;
             }
           }
         }
       }
+      
+      // 一番下（ROWS-1）に到達した落下中の駒も固定する
+      for (let x = 0; x < COLS; x++) {
+        let p = board[ROWS-1][x];
+        if (p && p.owner === 'enemy' && p.state === 'falling') {
+          p.state = 'fixed';
+          moved = true;
+        }
+      }
+
       if (moved) draw();
     }
 
-    // --- リアルタイム：敵のランダム出現 ---
+    // --- 敵の出現処理 ---
     function scheduleNextEnemy() {
       if (gameState !== 'playing') return;
-      // 1秒〜2.5秒のランダムな間隔で降ってくる
-      let delay = Math.random() * 1500 + 1000;
+      // 1.5秒〜3秒の間隔で降ってくる
+      let delay = Math.random() * 1500 + 1500;
       spawnTimer = setTimeout(() => {
         spawnEnemy();
         scheduleNextEnemy();
@@ -340,18 +360,15 @@
       if (gameState !== 'playing') return;
       const col = Math.floor(Math.random() * COLS);
       
-      // 出現位置（一番上）がすでに埋まっていたらゲームオーバー
-      if (board[0][col]) {
-        gameOver();
-        return;
+      // 一番上がすでに埋まっていたら何もしない（溢れたらゲームオーバーにしても良い）
+      if (!board[0][col]) {
+        const isKing = Math.random() < 0.1;
+        // stateを 'falling' にして生成
+        board[0][col] = { type: isKing ? '王' : 'block', owner: 'enemy', state: 'falling', promoted: false };
+        draw();
       }
-      
-      const isKing = Math.random() < 0.08; // 8%で王将
-      board[0][col] = { type: isKing ? '王' : 'block', owner: 'enemy', promoted: false };
-      draw();
     }
 
-    // 操作（アクション実行）
     function performAction() {
       checkLines();
       selectedCell = null;
@@ -395,14 +412,13 @@
       if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return;
 
       if (selectedCell === 'next') {
-        // 配置場所が空いているかチェック
         if (!board[ROWS - 1][x]) {
-          board[ROWS - 1][x] = { type: nextPiece, owner: 'player', promoted: false };
+          board[ROWS - 1][x] = { type: nextPiece, owner: 'player', state: 'fixed', promoted: false };
           nextPiece = getRandomPiece();
           nextEl.textContent = nextPiece;
           performAction();
         } else {
-          selectedCell = null; // 配置失敗（敵や味方がいる）
+          selectedCell = null;
           draw();
         }
         return;
@@ -411,11 +427,8 @@
       const move = validMoves.find(m => m.x === x && m.y === y);
       if (move && selectedCell) {
         const target = board[y][x];
-        // 移動先に敵がいたら破壊（捕獲）！
         if (target && target.owner === 'enemy') {
-           if (target.type === '王') {
-             triggerKingBonus(); // 王を直殴りしてもボーナス！
-           }
+           if (target.type === '王') triggerKingBonus();
         }
         
         const p = board[selectedCell.y][selectedCell.x];
@@ -438,13 +451,12 @@
       }
     });
 
-    // ゲーム開始
     setTimeout(() => {
       resize();
       initBoard();
       draw();
-      // 0.4秒ごとに重力発生、ランダム間隔で敵発生
-      gravityTimer = setInterval(applyGravity, 400);
+      // 0.5秒ごとに落下処理
+      gravityTimer = setInterval(applyGravity, 500);
       scheduleNextEnemy();
     }, 100);
 
