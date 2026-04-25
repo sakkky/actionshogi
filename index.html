@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>将棋テトリス：昇天 v2.0</title>
+  <title>将棋テトリス：昇天 v2.1 (思考バランス調整版)</title>
   <style>
     html, body {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -86,7 +86,7 @@
     document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
     document.addEventListener('touchstart', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 
-    // --- Audio System (簡易シンセ) ---
+    // --- Audio System ---
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     let actx = null;
     function playSound(type, combo = 1) {
@@ -102,7 +102,7 @@
         gain.gain.setValueAtTime(0.1, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
         osc.start(now); osc.stop(now + 0.1);
       } else if (type === 'clear') {
-        osc.type = 'square'; osc.frequency.setValueAtTime(200 + combo * 50, now); // コンボでピッチ上昇
+        osc.type = 'square'; osc.frequency.setValueAtTime(200 + combo * 50, now);
         gain.gain.setValueAtTime(0.2, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
         osc.start(now); osc.stop(now + 0.2);
       } else if (type === 'king') {
@@ -126,16 +126,15 @@
     // --- 状態管理 ---
     let gameState = { status: "title", score: 0, combo: 0, timeLeft: 180, maxCombo: 0 };
     let board = [];
-    let spawnQueue = []; // 敵NEXT
-    let myNextPiece = '歩'; // 自分のNEXT
+    let spawnQueue = []; 
+    let myNextPiece = '歩'; 
     const PIECE_TYPES = ['歩', '歩', '歩', '香', '桂'];
     const ENEMY_TYPES = ['歩', '歩', '香', '桂', '王'];
     
     let selectedCell = null;
     let validMoves = [];
-    let loopId, gravityTimerId, secondTimerId;
+    let loopId, gravityTimerId, secondTimerId, spawnTimerId;
 
-    // UI Elements
     const uiScore = document.getElementById('score-display');
     const uiTime = document.getElementById('time-display');
     const uiCombo = document.getElementById('combo-display');
@@ -167,9 +166,15 @@
       if(loopId) cancelAnimationFrame(loopId);
       if(gravityTimerId) clearInterval(gravityTimerId);
       if(secondTimerId) clearInterval(secondTimerId);
+      if(spawnTimerId) clearTimeout(spawnTimerId);
       
-      gravityTimerId = setInterval(applyGravity, 1000);
+      // バランス調整: 落下速度を1.5秒に
+      gravityTimerId = setInterval(applyGravity, 1500); 
       secondTimerId = setInterval(tickTime, 1000);
+      
+      // 敵の出現ループを開始
+      scheduleNextEnemy();
+      
       loop();
       overlay.style.display = 'none';
     }
@@ -187,17 +192,14 @@
 
     // --- コアロジック ---
 
-    // 1秒に1回呼ばれる
     function tickTime() {
       if(gameState.status !== 'playing') return;
       gameState.timeLeft--;
       updateUI();
       
-      // 終了判定
       if(gameState.timeLeft <= 0 || checkTopOut()) {
         endGame();
       }
-      // 危険演出
       if(checkDanger()) {
         dangerOverlay.style.opacity = '1';
         playSound('danger');
@@ -220,7 +222,29 @@
       return false;
     }
 
-    // 敵の落下
+    // --- 出現と落下の分離 ---
+    function scheduleNextEnemy() {
+      if(gameState.status !== 'playing') return;
+      // バランス調整: 3秒〜5秒のランダムな間隔で敵が出現
+      let delay = Math.random() * 2000 + 3000;
+      spawnTimerId = setTimeout(() => {
+        spawnEnemy();
+        scheduleNextEnemy();
+      }, delay);
+    }
+
+    function spawnEnemy() {
+      let emptyCols = [];
+      for(let x=0; x<COLS; x++) { if(!board[0][x]) emptyCols.push(x); }
+      if(emptyCols.length > 0) {
+        let col = emptyCols[Math.floor(Math.random() * emptyCols.length)];
+        let type = spawnQueue.shift();
+        spawnQueue.push(getRandPiece(ENEMY_TYPES));
+        board[0][col] = { type: type, owner: 'enemy', state: 'falling', promoted: false };
+        updateUI();
+      }
+    }
+
     function applyGravity() {
       if(gameState.status !== 'playing') return;
       let moved = false;
@@ -241,22 +265,8 @@
         if(p && p.owner === 'enemy' && p.state === 'falling') { p.state = 'fixed'; moved = true; }
       }
       
-      // 敵の生成（ランダムな空き列に）
-      spawnEnemy();
       if(moved) {
-        checkLines(); // 落下によってラインが揃うかもしれない
-      }
-    }
-
-    function spawnEnemy() {
-      let emptyCols = [];
-      for(let x=0; x<COLS; x++) { if(!board[0][x]) emptyCols.push(x); }
-      if(emptyCols.length > 0) {
-        let col = emptyCols[Math.floor(Math.random() * emptyCols.length)];
-        let type = spawnQueue.shift();
-        spawnQueue.push(getRandPiece(ENEMY_TYPES));
-        board[0][col] = { type: type, owner: 'enemy', state: 'falling', promoted: false };
-        updateUI();
+        checkLines(); // 落下によってラインが揃うか判定
       }
     }
 
@@ -284,10 +294,8 @@
       return moves;
     }
 
-    // --- 消去・効果ロジック ---
     function checkLines(isChain = false) {
       let linesToClear = [];
-      // 下から判定
       for(let y = ROWS - 1; y >= 0; y--) {
         let full = true;
         for(let x = 0; x < COLS; x++) { if(!board[y][x]) { full = false; break; } }
@@ -295,12 +303,11 @@
       }
 
       if(linesToClear.length === 0) {
-        if(!isChain) gameState.combo = 0; // 連鎖終了でコンボリセット
+        if(!isChain) gameState.combo = 0;
         updateUI();
         return;
       }
 
-      // 消去処理
       gameState.combo++;
       if(gameState.combo > gameState.maxCombo) gameState.maxCombo = gameState.combo;
       playSound('clear', gameState.combo);
@@ -309,7 +316,6 @@
       let multiplier = gameState.combo === 1 ? 1.0 : gameState.combo === 2 ? 1.5 : 2.0;
       gameState.score += Math.floor(baseScore * multiplier);
 
-      // 効果の収集と駒の削除
       let effects = { kyo: [], kei: [], ou: false };
       
       linesToClear.forEach(y => {
@@ -320,12 +326,10 @@
             if(p.type === '桂') effects.kei.push({x, y});
             if(p.type === '王') effects.ou = true;
           }
-          board[y][x] = null; // 消去
+          board[y][x] = null;
         }
       });
 
-      // 上のブロックを詰める（テトリス挙動：消えた行の上にだけ影響）
-      // 簡易化のため、下から空行を探して詰める
       for (let x = 0; x < COLS; x++) {
         let writeY = ROWS - 1;
         for (let readY = ROWS - 1; readY >= 0; readY--) {
@@ -337,7 +341,6 @@
         for (; writeY >= 0; writeY--) board[writeY][x] = null;
       }
 
-      // 追加効果の適用
       applyLineEffect(effects);
     }
 
@@ -352,13 +355,11 @@
         }
         effectTriggered = true;
       } else {
-        // 香：縦全消し
         effects.kyo.forEach(col => {
           for(let y=0; y<ROWS; y++) {
              if(board[y][col] && board[y][col].owner === 'enemy') { board[y][col] = null; effectTriggered = true; }
           }
         });
-        // 桂：周囲8マス
         effects.kei.forEach(pos => {
           for(let dy=-1; dy<=1; dy++) for(let dx=-1; dx<=1; dx++) {
             let nx = pos.x+dx, ny = pos.y+dy;
@@ -369,9 +370,7 @@
         });
       }
 
-      // 効果で消えた場合、さらにブロックが落ちて連鎖するかもしれない
       if(effectTriggered) {
-        // 再度重力を適用して落とす
         for (let x = 0; x < COLS; x++) {
           let writeY = ROWS - 1;
           for (let readY = ROWS - 1; readY >= 0; readY--) {
@@ -385,8 +384,6 @@
       }
       
       updateUI();
-      
-      // 落ちコン判定
       setTimeout(() => checkLines(true), 200); 
     }
 
@@ -403,19 +400,17 @@
       const y = Math.floor((e.clientY - rect.top) / cellSize);
       if(x < 0 || x >= COLS || y < 0 || y >= ROWS) return;
 
-      // NEXT配置
       if(selectedCell === 'next') {
         if(!board[ROWS-1][x]) {
           board[ROWS-1][x] = { type: myNextPiece, owner: 'player', state: 'fixed', promoted: false };
           myNextPiece = getRandPiece(PIECE_TYPES);
           playSound('move');
           selectedCell = null;
-          checkLines(false); // アクション後にチェック
+          checkLines(false);
         } else { selectedCell = null; draw(); }
         return;
       }
 
-      // 移動実行
       const move = validMoves.find(m => m.x === x && m.y === y);
       if(move && selectedCell) {
         let p = board[selectedCell.y][selectedCell.x];
@@ -428,7 +423,6 @@
         return;
       }
 
-      // 駒選択
       if(board[y][x] && board[y][x].owner === 'player') {
         selectedCell = {x, y}; validMoves = getValidMoves(x, y); draw();
       } else {
@@ -457,7 +451,6 @@
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // ゾーン背景
       ctx.fillStyle = 'rgba(211, 47, 47, 0.15)'; ctx.fillRect(0, 0, canvas.width, cellSize * 3);
       ctx.beginPath(); ctx.moveTo(0, cellSize * 3); ctx.lineTo(canvas.width, cellSize * 3);
       ctx.strokeStyle = 'rgba(211, 47, 47, 0.5)'; ctx.lineWidth = 2; ctx.stroke();
@@ -515,7 +508,7 @@
 
     function endGame() {
       gameState.status = "gameover";
-      clearInterval(gravityTimerId); clearInterval(secondTimerId);
+      clearInterval(gravityTimerId); clearInterval(secondTimerId); clearTimeout(spawnTimerId);
       
       let rank = gameState.score >= 10000 ? "S" : gameState.score >= 5000 ? "A" : gameState.score >= 2000 ? "B" : "C";
       document.getElementById('result-title').textContent = "TIME UP!";
