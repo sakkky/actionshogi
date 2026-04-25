@@ -3,19 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>将棋テトリス：昇天 (画面ぴったり編)</title>
+  <title>将棋テトリス：昇天 (完全画面収まり編)</title>
   <style>
-    /* 画面全体を固定（fixed）して、絶対にスクロールやはみ出しを起こさせない設定 */
+    /* 画面全体の設定：下部にセーフエリア（余白）を強制的に確保 */
     html, body {
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;
       margin: 0; padding: 0;
+      /* iPhoneの下部バー（ホームインジケーター）を避けるための必須設定 */
+      padding-bottom: calc(env(safe-area-inset-bottom) + 20px); 
       background-color: #222; color: #fff; font-family: 'Helvetica Neue', Arial, sans-serif;
       display: flex; flex-direction: column; align-items: center;
-      touch-action: none;
-      overscroll-behavior: none;
-      -webkit-text-size-adjust: 100%;
-      user-select: none; -webkit-user-select: none;
+      touch-action: none; overscroll-behavior: none;
+      -webkit-text-size-adjust: 100%; user-select: none; -webkit-user-select: none;
     }
     #ui-header {
       width: 100%; max-width: 400px; display: flex; justify-content: space-between; align-items: center;
@@ -23,8 +23,7 @@
     }
     .panel {
       background: #444; border-radius: 8px; padding: 5px 10px; text-align: center; width: 60px; height: 60px;
-      display: flex; flex-direction: column; justify-content: center; border: 2px solid #555;
-      cursor: pointer;
+      display: flex; flex-direction: column; justify-content: center; border: 2px solid #555; cursor: pointer;
     }
     .panel:active { transform: scale(0.95); background: #555; }
     .panel span { font-size: 10px; color: #aaa; pointer-events: none; }
@@ -36,10 +35,12 @@
     #score-display { font-size: 24px; font-weight: bold; color: #4caf50; text-shadow: 1px 1px 2px #000; }
     #status-display { font-size: 12px; font-weight: bold; color: #ff9800; margin-top: 4px; }
     
+    /* キャンバスを中央に配置し、上下に余裕をもたせる */
     #canvas-container {
-      flex-grow: 1; display: flex; justify-content: center; align-items: center; width: 100%; overflow: hidden;
+      flex-grow: 1; display: flex; justify-content: center; align-items: center; 
+      width: 100%; padding: 10px; box-sizing: border-box;
     }
-    canvas { background-color: #E2C275; box-shadow: 0 0 15px rgba(0,0,0,0.8); touch-action: none; }
+    canvas { background-color: #E2C275; box-shadow: 0 0 15px rgba(0,0,0,0.8); touch-action: none; border-radius: 4px; }
     
     #message-overlay {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
@@ -96,15 +97,14 @@
     let gravityTimer;
     let spawnTimer;
 
-    // --- サイズ計算の精度を上げる ---
     function resize() {
-      const headerHeight = document.getElementById('ui-header').offsetHeight;
-      // 画面全体の高さからヘッダーと余白(20px)を引いた「純粋に使える高さ」
-      const availableHeight = window.innerHeight - headerHeight - 20;
-      // 幅も少し余白を持たせる
-      const availableWidth = Math.min(window.innerWidth, 400) - 10;
+      const header = document.getElementById('ui-header');
+      const safeBottom = parseInt(getComputedStyle(document.body).paddingBottom) || 20;
+      
+      // 絶対に画面からはみ出さないように、高さを「画面サイズ - ヘッダー - 下部セーフエリア - さらに40pxの余裕」で計算
+      const availableHeight = window.innerHeight - header.offsetHeight - safeBottom - 40;
+      const availableWidth = Math.min(window.innerWidth, 400) - 20;
 
-      // 縦横どちら基準でもはみ出さないサイズを決定
       cellSize = Math.min(Math.floor(availableWidth / COLS), Math.floor(availableHeight / ROWS));
       
       canvas.width = cellSize * COLS;
@@ -113,6 +113,7 @@
     }
     
     window.addEventListener('resize', () => { setTimeout(resize, 100); });
+    window.addEventListener('orientationchange', () => { setTimeout(resize, 200); });
 
     function getRandomPiece() {
       return PIECE_TYPES[Math.floor(Math.random() * PIECE_TYPES.length)];
